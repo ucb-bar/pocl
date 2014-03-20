@@ -917,6 +917,17 @@ case $host_cpu in
     CLANG_MARCH_FLAG="mcpu"
     ;;
 
+  riscv*)
+    AC_MSG_NOTICE([using the riscv optimized kernel lib for the native device])
+    HOST_LD_FLAGS="$HOST_LD_FLAGS -lm"
+    llc_triple="riscv-unknown-linux-gnu"
+    llc_host_cpu="RV64IAMFD"
+    CL_DEVICE_ADDRESS_BITS=64
+    #TODO: not all PowerPCs have Altivec?
+    HOST_LLC_FLAGS="$HOST_LLC_FLAGS -march=riscv -mattr=+RV64,+a,+m,+f,+d"
+    CLANG_MARCH_FLAG="mriscv"
+    ;;
+
   powerpc*)
     test ${LLVM_VERSION:0:3} == "3.4" && AC_MSG_ERROR([LLVM 3.4 fails on PowerPC, use 3.3])
     #on all tested operating systems with PowerPC, the processor is 64bit,
