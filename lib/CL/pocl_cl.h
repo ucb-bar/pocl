@@ -202,7 +202,8 @@ struct pocl_device_ops {
   void (*uninit) (cl_device_id device);
   void (*init) (cl_device_id device, const char *parameters);
   void *(*malloc) (void *data, cl_mem_flags flags,
-		   size_t size, void *host_ptr);
+                   size_t size, void *host_ptr);
+  cl_int (*alloc_mem_obj) (cl_device_id device, cl_mem mem_obj);
   void *(*create_sub_buffer) (void *data, void* buffer, size_t origin, size_t size);
   void (*free) (void *data, cl_mem_flags flags, void *ptr);
   void (*read) (void *data, void *host_ptr, const void *device_ptr, size_t cb);
@@ -253,16 +254,6 @@ void (*fill_rect) (void *data,
   void (*run_native) (void *data, _cl_command_node* cmd);
 
   cl_ulong (*get_timer_value) (void *data); /* The current device timer value in nanoseconds. */
-
-  /* Can be used to override the default action for initial .cl to .bc build. 
-     Deprecated: this will be removed with the pocl-build script. */
-  int (*build_program) 
-  (void *data, 
-   const char *source_fn, 
-   const char *binary_fn, 
-   const char *default_cmd, 
-   const char *user_opts, 
-   const char *dev_tmpdir);
 
   /* Perform initialization steps and can return additional
      build options that are required for the device. The caller
@@ -356,6 +347,7 @@ struct _cl_device_id {
   /* A running number (starting from zero) across all the device instances. Used for 
      indexing  arrays in data structures with device specific entries. */
   int dev_id;
+  int global_mem_id; /* identifier for device global memory */
   int has_64bit_long;  /* Does the device have 64bit longs */
 
   struct pocl_device_ops *ops; /* Device operations, shared amongst same devices */
@@ -392,8 +384,14 @@ struct _cl_command_queue {
   _cl_command_node *root;
 };
 
-typedef struct _cl_mem cl_mem_t;
+/* memory identifier: id to point the global memory where memory resides 
+                      + pointer to actual data */
+typedef struct _pocl_mem_identifier{
+  int global_mem_id;
+  void* mem_ptr;
+} pocl_mem_identifier;
 
+typedef struct _cl_mem cl_mem_t;
 struct _cl_mem {
   POCL_ICD_OBJECT
   POCL_OBJECT;
@@ -413,7 +411,7 @@ struct _cl_mem {
      though the buffer was not allocated for all.
      The location of the device's buffer ptr is determined by
      the device's dev_id. */
-  void **device_ptrs;
+  pocl_mem_identifier *device_ptrs;
   /* A linked list of regions of the buffer mapped to the 
      host memory */
   mem_mapping_t *mappings;

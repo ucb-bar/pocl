@@ -1,7 +1,8 @@
-/* pocl_llvm_api.cc: C wrappers for calling the LLVM/Clang C++ APIs
+/* pocl_llvm_api.cc: C wrappers for calling the LLVM/Clang C++ APIs to invoke
+   the different kernel compilation phases.
 
-   Copyright (c) 2013 Kalle Raiskila and
-                      Pekka Jääskeläinen
+   Copyright (c) 2013 Kalle Raiskila 
+                 2013-2014 Pekka Jääskeläinen
    
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +51,7 @@
 
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
@@ -62,6 +64,7 @@
 #include <sys/stat.h>
 
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <sstream>
 #include <string>
@@ -84,24 +87,87 @@ using llvm::sys::fs::F_Binary;
 #endif
 
 
+/**
+ * Use one global LLVMContext across all LLVM bitcodes. This is because
+ * we want to cache the bitcode IR libraries and reuse them when linking
+ * new kernels. The CloneModule etc. seem to assume we are linking
+ * bitcodes with a same LLVMContext. Unfortunately, this requires serializing
+ * all calls to the LLVM APIs with mutex.
+ * Freeing/deleting the context crashes LLVM 3.2 (at program exit), as a
+ * work-around, allocate this from heap.
+ */
+static LLVMContext *globalContext=NULL;
+
+/* The LLVM API interface functions are not at the moment not thread safe,
+   ensure only one thread is using this layer at the time with a mutex. */
+//static pocl_lock_t kernel_compiler_lock = POCL_LOCK_INITIALIZER;
+
+static llvm::sys::Mutex kernelCompilerLock;
+
 //#define DEBUG_POCL_LLVM_API
 
+// Write a kernel compilation intermediate result
+// to file on disk, if user has requested with environment
+// variable
+// TODO: what to do on errors?
+static inline void
+write_temporary_file( const llvm::Module *mod,
+                      const char *filename )
+{
+  std::string ErrorInfo;
+  tool_output_file *Out;
+  Out = new tool_output_file(filename, ErrorInfo, F_Binary);
+  WriteBitcodeToFile(mod, Out->os());
+  Out->keep();
+  delete Out;
+}
 
-/* "emulate" the pocl_build script.
- * This compiles an .cl file into LLVM IR 
- * (the "program.bc") file.
- * unlike the script, a intermediate preprocessed 
- * program.bc.i file is not produced.
- */
-int call_pocl_build(cl_program program, 
-                    cl_device_id device, 
-                    int device_i,     
-                    const char* source_file_name,
-                    const char* binary_file_name,
-                    const char* device_tmpdir,
-                    const char* user_options)
+// Read input source to clang::FrontendOptions.
+// The source is contained in the program->source array,
+// but if debugging option is enabled in the kernel compiler
+// we need to dump the file to disk first for the debugger
+// to find it.
+static inline int
+load_source( FrontendOptions &fe,
+             const char* temp_dir,
+             cl_program program )
+{
+// this doesn't work
+#if 0 
+  // TODO: dump also when debugging kernels
+  if (pocl_get_bool_option("POCL_LEAVE_TEMP_DIRS", 0)==0) {
+    llvm::MemoryBuffer *buf;
+    buf = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(program->source));
+    fe.Inputs.push_back
+      (FrontendInputFile(buf, clang::IK_OpenCL));
+  } else {
+#endif
+    std::string kernel_file(temp_dir);
+    kernel_file += POCL_PROGRAM_CL_FILENAME;
+    std::ofstream ofs(kernel_file.c_str());
+    ofs << program->source;
+    if (!ofs.good())
+      return CL_OUT_OF_HOST_MEMORY;
+    fe.Inputs.push_back
+      (FrontendInputFile(kernel_file, clang::IK_OpenCL));
+
+  return 0;
+}
+
+int pocl_llvm_build_program(cl_program program, 
+                            cl_device_id device, 
+                            int device_i,     
+                            const char* temp_dir,
+                            const char* binary_file_name,
+                            const char* device_tmpdir,
+                            const char* user_options)
 
 { 
+  llvm::MutexGuard lockHolder(kernelCompilerLock);
+
+  /* TODO: This should be in a initialization function somewhere. */
+  if (globalContext==NULL)
+		globalContext = new LLVMContext();
 
   // Use CompilerInvocation::CreateFromArgs to initialize
   // CompilerInvocation. This way we can reuse the Clang's
@@ -118,9 +184,7 @@ int call_pocl_build(cl_program program,
   CompilerInstance CI;
   CompilerInvocation &pocl_build = CI.getInvocation();
 
-  // TODO: call device->prepare_build() that can return
-  // device-specific switches too, to replace the build_program()
-  // API TCE uses to include the custom op macros.
+  // add device specific switches, if any
   std::stringstream ss;
 
   if (device->ops->init_build != NULL) 
@@ -263,9 +327,8 @@ int call_pocl_build(cl_program program,
   FrontendOptions &fe = pocl_build.getFrontendOpts();
   // The CreateFromArgs created an stdin input which we should remove first.
   fe.Inputs.clear(); 
-  fe.Inputs.push_back
-    (FrontendInputFile(source_file_name, clang::IK_OpenCL));
-  fe.OutputFile = std::string(binary_file_name);
+  if (load_source(fe, temp_dir, program)!=0)
+    return CL_OUT_OF_HOST_MEMORY;
 
   CodeGenOptions &cg = pocl_build.getCodeGenOpts();
   cg.EmitOpenCLArgMetadata = true;
@@ -277,21 +340,18 @@ int call_pocl_build(cl_program program,
 
   bool success = true;
   clang::CodeGenAction *action = NULL;
-  // TODO: switch to EmitLLVMOnlyAction, when intermediate file is not needed
-  // Dump the intermediate bitcode for the program to disk only if needed.
-  if (pocl_get_bool_option("POCL_LEAVE_TEMP_DIRS", 0)) 
-    action = new clang::EmitBCAction();
-  else
-    action = new clang::EmitLLVMOnlyAction();
-
+  action = new clang::EmitLLVMOnlyAction(globalContext);
   success |= CI.ExecuteAction(*action);
-
+  // FIXME: memleak, see FIXME below
   if (!success) return CL_BUILD_PROGRAM_FAILURE;
 
   llvm::Module **mod = (llvm::Module **)&program->llvm_irs[device_i];
   if (*mod != NULL)
     delete (llvm::Module*)*mod;
   *mod = action->takeModule();
+
+  if (!pocl_get_bool_option("POCL_LEAVE_TEMP_DIRS", 0))
+    write_temporary_file(*mod, binary_file_name);
 
   // FIXME: cannot delete action as it contains something the llvm::Module
   // refers to. We should create it globally, at compiler initialization time.
@@ -300,16 +360,13 @@ int call_pocl_build(cl_program program,
   return CL_SUCCESS;
 }
 
-/* Retrieve metadata of the given kernel in the program to populate the
- * cl_kernel object.
- */
-int call_pocl_kernel(cl_program program, 
-                     cl_kernel kernel,
-                     int device_i,     
-                     const char* kernel_name,
-                     const char* device_tmpdir, 
-                     char* descriptor_filename,
-                     int */*errcode*/)
+int pocl_llvm_get_kernel_metadata(cl_program program, 
+                                  cl_kernel kernel,
+                                  int device_i,     
+                                  const char* kernel_name,
+                                  const char* device_tmpdir, 
+                                  char* descriptor_filename,
+                                  int */*errcode*/)
 {
 
   int i;
@@ -323,6 +380,10 @@ int call_pocl_kernel(cl_program program,
   assert(program->devices[device_i]->llvm_target_triplet && 
          "Device has no target triple set"); 
 
+  /* TODO: This should be in a initialization function somewhere. */
+  if (globalContext==NULL)
+		globalContext = new LLVMContext();
+
   LLVMContext *context = NULL;
 
   if (program->llvm_irs != NULL &&
@@ -332,7 +393,7 @@ int call_pocl_kernel(cl_program program,
 #ifdef DEBUG_POCL_LLVM_API
       printf("### use a saved llvm::Module\n");
 #endif
-      context = &input->getContext();
+      context = globalContext;
     }
 
   snprintf (tmpdir, POCL_FILENAME_LENGTH, "%s/%s", 
@@ -360,7 +421,7 @@ int call_pocl_kernel(cl_program program,
         return CL_OUT_OF_HOST_MEMORY;
       fclose(binary_file); 
 
-      context = new LLVMContext;
+      context = globalContext;
       input = ParseIRFile(binary_filename, Err, *context);
       if (!input) 
         {
@@ -617,10 +678,6 @@ static TargetMachine* GetTargetMachine
 }
 
 /* helpers copied from LLVM opt END */
-
-/* The kernel compiler passes are at the moment not thread safe,
-   ensure only one thread is using it at the time with a mutex. */
-static pocl_lock_t kernel_compiler_lock = POCL_LOCK_INITIALIZER;
 
 /**
  * Prepare the kernel compiler passes.
@@ -891,34 +948,24 @@ namespace pocl {
 extern llvm::cl::list<int> LocalSize;
 } 
 
-/* This is used to control the kernel we want to process in the kernel compilation. */
-extern cl::opt<std::string> KernelName;
-
-/* This function links the input kernel LLVM bitcode and the
- * OpenCL kernel runtime library into one LLVM module, then
- * runs pocl's kernel compiler passes on that module to produce 
- * a function that executes all work-items in a work-group.
- *
- * Output is a LLVM bitcode file. 
- *
- * TODO: rename these functions for something more descriptive.
- * TODO: this is not thread-safe, it changes the LLVM global options to
- * control the compilation. We should enforce only one compilations is done
- * at a time or control the options through thread safe methods.
+/**
+ * Return the OpenCL C built-in function library bitcode
+ * for the given device.
  */
-int call_pocl_workgroup(cl_device_id device,
-                        cl_kernel kernel,
-                        size_t local_x, size_t local_y, size_t local_z,
-                        const char* parallel_filename,
-                        const char* kernel_filename)
+static llvm::Module*
+kernel_library
+(cl_device_id device, llvm::Module* root)
 {
+  llvm::MutexGuard lockHolder(kernelCompilerLock);
 
-#ifdef DEBUG_POCL_LLVM_API        
-  printf("### calling the kernel compiler for kernel %s local_x %u local_y %u local_z %u parallel_filename: %s\n",
-         kernel->name, local_x, local_y, local_z, parallel_filename);
-#endif
+  static std::map<cl_device_id, llvm::Module*> libs;
 
   Triple triple(device->llvm_target_triplet);
+
+  if (libs.find(device) != libs.end())
+    {
+      return libs[device];
+    }
 
   // TODO sync with Nat Ferrus' indexed linking
   std::string kernellib;
@@ -953,7 +1000,35 @@ int call_pocl_workgroup(cl_device_id device,
       kernellib += ".bc";
     }
 
-  LLVMContext *Context = NULL;
+  SMDiagnostic Err;
+  llvm::Module *lib = ParseIRFile(kernellib, Err, *globalContext);
+  assert (lib != NULL);
+  libs[device] = lib;
+
+  return lib;
+}
+
+/* This is used to control the kernel we want to process in the kernel compilation. */
+extern cl::opt<std::string> KernelName;
+
+int pocl_llvm_generate_workgroup_function(cl_device_id device,
+                                          cl_kernel kernel,
+                                          size_t local_x, size_t local_y, size_t local_z,
+                                          const char* parallel_filename,
+                                          const char* kernel_filename)
+{
+  llvm::MutexGuard lockHolder(kernelCompilerLock);
+
+#ifdef DEBUG_POCL_LLVM_API        
+  printf("### calling the kernel compiler for kernel %s local_x %u "
+         "local_y %u local_z %u parallel_filename: %s\n",
+         kernel->name, local_x, local_y, local_z, parallel_filename);
+#endif
+
+  Triple triple(device->llvm_target_triplet);
+
+
+  LLVMContext *Context = globalContext;
   SMDiagnostic Err;
   std::string errmsg;
 
@@ -965,37 +1040,28 @@ int call_pocl_workgroup(cl_device_id device,
       input = 
         llvm::CloneModule
         ((llvm::Module*)kernel->program->llvm_irs[device->dev_id]);
-      Context = &input->getContext();
     }
   else
     {
-      Context = new LLVMContext;
       input = ParseIRFile(kernel_filename, Err, *Context);
     }
 
-  // OPTIMIZE: the built-in libs should be loaded only once per device.
   // Later this should be replaced with indexed linking of source code
   // and/or bitcode for each kernel.
-  llvm::Module *libmodule = ParseIRFile(kernellib, Err, *Context);
+  llvm::Module *libmodule = kernel_library(device, input);
   assert (libmodule != NULL);
 #ifdef LLVM_3_2
-  Linker TheLinker("pocl", input);
-  TheLinker.LinkInModule(libmodule, &errmsg);
+  Linker TheLinker("pocl", input, Linker::PreserveSource);
+  Linker::LinkModules(input, libmodule, Linker::PreserveSource, &errmsg);
 #else
   Linker TheLinker(input);
-  TheLinker.linkInModule(libmodule, &errmsg);
+  TheLinker.linkInModule(libmodule, Linker::PreserveSource, &errmsg);
 #endif
   llvm::Module *linked_bc = TheLinker.getModule();
 
   assert (linked_bc != NULL);
 
   /* Now finally run the set of passes assembled above */
-  std::string ErrorInfo;
-  tool_output_file *Out = new tool_output_file(parallel_filename, 
-                                               ErrorInfo, 
-                                               F_Binary);
-
-  POCL_LOCK(kernel_compiler_lock);
 
   // TODO pass these as parameters instead, this is not thread safe!
   pocl::LocalSize.clear();
@@ -1005,15 +1071,10 @@ int call_pocl_workgroup(cl_device_id device,
   KernelName = kernel->name;
 
   kernel_compiler_passes(device, linked_bc->getDataLayout()).run(*linked_bc);
-  POCL_UNLOCK(kernel_compiler_lock);
 
-  WriteBitcodeToFile(linked_bc, Out->os()); 
+  // TODO: don't write this once LLC is called via API, not system()
+  write_temporary_file(linked_bc, parallel_filename);
 
-  //  input->dump();
-  // linked_bc->dump();
-
-  Out->keep();
-  delete Out;
 #ifndef LLVM_3_2
   // In LLVM 3.2 the Linker object deletes the associated Modules.
   // If we delete here, it will crash.
@@ -1026,6 +1087,9 @@ int call_pocl_workgroup(cl_device_id device,
 }
 
 void pocl_llvm_update_binaries (cl_program program) {
+
+  llvm::MutexGuard lockHolder(kernelCompilerLock);
+
   // Dump the LLVM IR Modules to memory buffers. 
   assert (program->llvm_irs != NULL);
 #ifdef DEBUG_POCL_LLVM_API        
@@ -1041,15 +1105,8 @@ void pocl_llvm_update_binaries (cl_program program) {
         program->devices[i]->short_name + "/" +
         POCL_PROGRAM_BC_FILENAME;
 
-      std::string ErrorInfo;
-      tool_output_file *Out = new tool_output_file
-        (binary_filename.c_str(), 
-         ErrorInfo, 
-         F_Binary);
-
-      WriteBitcodeToFile((const llvm::Module*)program->llvm_irs[i], Out->os()); 
-      Out->keep();
-      delete Out;
+      write_temporary_file((llvm::Module*)program->llvm_irs[i],
+                           binary_filename.c_str()); 
 
       FILE *binary_file = fopen(binary_filename.c_str(), "r");
       if (binary_file == NULL)        
@@ -1078,13 +1135,11 @@ void pocl_llvm_update_binaries (cl_program program) {
     }
 }
 
-/* Get the function name pointers in program's LLVM IR modules,
- * filling up to max_num_krn to the caller allocated knames
- * return actual amount of kernel functions found (not filled)
- */
 int
-get_kernel_names( cl_program program, const char **knames, unsigned max_num_krn )
+pocl_llvm_get_kernel_names( cl_program program, const char **knames, unsigned max_num_krn )
 {
+  llvm::MutexGuard lockHolder(kernelCompilerLock);
+
   // TODO: is it safe to assume every device (i.e. the index 0 here)
   // has the same set of programs & kernels?
   llvm::Module *mod = (llvm::Module *) program->llvm_irs[0];

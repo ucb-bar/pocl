@@ -279,6 +279,30 @@ TCEDevice::updateCurrentKernel(const _cl_command_run* runCmd,
   curLocalZ = runCmd->local_z;
 }
 
+cl_int
+pocl_tce_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
+{
+  void *b = NULL;
+  TCEDevice *d = (TCEDevice*)device->data;
+  cl_int flags = mem_obj->flags;
+
+  /* if memory for this global memory is not yet allocated -> do it */
+  if (mem_obj->device_ptrs[device->global_mem_id].mem_ptr == NULL)
+    {
+      b = pocl_tce_malloc
+        (device->data, flags, mem_obj->size, mem_obj->mem_host_ptr);
+      if (b == NULL) return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      mem_obj->device_ptrs[device->global_mem_id].mem_ptr = b;
+      mem_obj->device_ptrs[device->global_mem_id].global_mem_id = 
+        device->global_mem_id;
+    }
+  /* copy already allocated global mem info to devices own slot */
+  mem_obj->device_ptrs[device->dev_id] = 
+    mem_obj->device_ptrs[device->global_mem_id];
+    
+  return CL_SUCCESS;
+
+}
 
 void *
 pocl_tce_malloc (void *device_data, cl_mem_flags flags,
@@ -452,7 +476,7 @@ pocl_tce_run
             dev_cmd.args[i] = 0;
           else
             dev_cmd.args[i] = byteswap_uint32_t 
-              (((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[d->parent->dev_id]))->start_address, d->needsByteSwap);
+              (((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[d->parent->dev_id].mem_ptr))->start_address, d->needsByteSwap);
         }
       else /* The scalar values should be byteswapped by the user. */
         {
@@ -611,22 +635,6 @@ pocl_tce_init_build(void *data, const char *dev_tmpdir)
   char *include_switch = strdup(includeSwitch.c_str());
 
   return include_switch;
-}
-
-int 
-pocl_tce_build_program (void *data, const char *source_fn, const char *binary_fn, 
-                        const char *default_cmd, const char *user_opts, const char *dev_tmpdir) 
-{
-  const char *include_switch =
-    pocl_tce_init_build(data, dev_tmpdir);
-
-  std::string buildCmd = 
-    std::string("EXTRA_CPPFLAGS=\"") + std::string(include_switch) +
-    std::string("\" ") + std::string(default_cmd);
-
-  free ((void*)include_switch);
-
-  return system (buildCmd.c_str());
 }
 
 void

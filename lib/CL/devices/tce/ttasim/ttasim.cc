@@ -74,6 +74,7 @@ pocl_ttasim_init_device_ops(struct pocl_device_ops *ops)
   ops->uninit = pocl_ttasim_uninit;
   ops->init = pocl_ttasim_init;
   ops->malloc = pocl_tce_malloc;
+  ops->alloc_mem_obj = pocl_tce_alloc_mem_obj;
   ops->create_sub_buffer = pocl_tce_create_sub_buffer;
   ops->free = pocl_tce_free;
   ops->read = pocl_tce_read;
@@ -85,7 +86,6 @@ pocl_ttasim_init_device_ops(struct pocl_device_ops *ops)
   ops->map_mem = pocl_tce_map_mem;
   ops->run = pocl_tce_run;
   ops->get_timer_value = pocl_ttasim_get_timer_value;
-  ops->build_program = pocl_tce_build_program;
   ops->init_build = pocl_tce_init_build;
 }
 
@@ -259,9 +259,9 @@ public:
           {
             if (al->value == NULL) continue;
             unsigned start_addr = 
-              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id]))->start_address;
+              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id].mem_ptr))->start_address;
             unsigned size = 
-              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id]))->size;
+              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id].mem_ptr))->size;
 
             out << "__global__ char buffer_" << std::hex << start_addr 
                 << "[] = {" << std::endl << "\t";
@@ -342,7 +342,7 @@ public:
         else if (run_cmd->kernel->arg_is_pointer[a] && dev_cmd.args[a] != 0)
           {
             unsigned start_addr = 
-              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id]))->start_address;
+              ((chunk_info_t*)((*(cl_mem *) (al->value))->device_ptrs[parent->dev_id].mem_ptr))->start_address;
             
             out << "(uint32_t)&buffer_" << std::hex << start_addr << "[0]";
           }
