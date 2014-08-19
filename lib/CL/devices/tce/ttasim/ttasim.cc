@@ -32,7 +32,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <pthread.h>
+//#include <pthread.h>
 #include <string>
 
 /* Supress some warnings because of including tce_config.h after pocl's config.h. */

@@ -31,7 +31,7 @@
 #ifndef POCL_TOPOLOGY_H
 #define POCL_TOPOLOGY_H
 
-#define MIN_MAX_MEM_ALLOC_SIZE (128*1024*1024)
+#define MIN_MAX_MEM_ALLOC_SIZE (256*1024*1024)
 
 #pragma GCC visibility push(hidden)
 void pocl_topology_detect_device_info(cl_device_id device);

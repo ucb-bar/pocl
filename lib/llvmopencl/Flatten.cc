@@ -25,6 +25,7 @@
 #include <iostream>
 #include <string>
 #include "Workgroup.h"
+#include "Flatten.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Pass.h"
@@ -35,18 +36,7 @@
 #endif
 
 using namespace llvm;
-
-namespace {
-  class Flatten : public ModulePass {
-
-  public:
-    static char ID;
-    Flatten() : ModulePass(ID) {}
-
-    virtual bool runOnModule(Module &M);
-  };
-
-}
+using namespace pocl;
 
 extern cl::opt<std::string> KernelName;
 

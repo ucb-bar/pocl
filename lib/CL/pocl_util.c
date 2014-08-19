@@ -58,6 +58,7 @@ char*
 pocl_create_temp_dir() 
 {  
   char *path_name; 
+  putenv("POCL_TEMP_DIR=pocl");
   if (getenv(POCL_TEMPDIR_ENV) != NULL &&
       access (getenv(POCL_TEMPDIR_ENV), F_OK) == 0) 
     {

@@ -27,8 +27,8 @@
 
 typedef struct _mem_manager
 {
-  pocl_lock_t event_lock;
-  pocl_lock_t cmd_lock;
+  //pocl_lock_t event_lock;
+  //pocl_lock_t cmd_lock;
   cl_event event_list;
   _cl_command_node *volatile cmd_list;
 } pocl_mem_manager;
@@ -41,23 +41,23 @@ void pocl_init_mem_manager (void)
   if (!mm)
     {
       mm = calloc (1, sizeof (pocl_mem_manager));
-      POCL_INIT_LOCK (mm->event_lock);
-      POCL_INIT_LOCK (mm->cmd_lock);
+      //POCL_INIT_LOCK (mm->event_lock);
+      //POCL_INIT_LOCK (mm->cmd_lock);
     }
 }
 
 cl_event pocl_mem_manager_new_event ()
 {
   cl_event ev = NULL;
-  POCL_LOCK (mm->event_lock);
+  //POCL_LOCK (mm->event_lock);
   if (ev = mm->event_list)
     {
       LL_DELETE (mm->event_list, ev);
-      POCL_UNLOCK (mm->event_lock);
+      //POCL_UNLOCK (mm->event_lock);
       ev->pocl_refcount = 2; /* no need to lock because event is not in use */
       return ev;
     }
-  POCL_UNLOCK (mm->event_lock);
+  //POCL_UNLOCK (mm->event_lock);
     
   ev = calloc (1, sizeof (struct _cl_event));
   POCL_INIT_OBJECT(ev);
@@ -67,18 +67,18 @@ cl_event pocl_mem_manager_new_event ()
 
 void pocl_mem_manager_free_event (cl_event event)
 {
-  POCL_LOCK (mm->event_lock);
+  //POCL_LOCK (mm->event_lock);
   LL_PREPEND (mm->event_list, event);
-  POCL_UNLOCK(mm->event_lock);
+  //POCL_UNLOCK(mm->event_lock);
 }
 
 _cl_command_node* pocl_mem_manager_new_command ()
 {
   _cl_command_node *cmd = NULL;
-  POCL_LOCK (mm->cmd_lock);
+  //POCL_LOCK (mm->cmd_lock);
   if (cmd = mm->cmd_list)
     LL_DELETE (mm->cmd_list, cmd);
-  POCL_UNLOCK (mm->cmd_lock);
+  //POCL_UNLOCK (mm->cmd_lock);
   
   if (cmd)
     return cmd;
@@ -88,7 +88,7 @@ _cl_command_node* pocl_mem_manager_new_command ()
 
 void pocl_mem_manager_free_command ( _cl_command_node *cmd_ptr)
 {
-  POCL_LOCK (mm->cmd_lock);
+  //POCL_LOCK (mm->cmd_lock);
   LL_PREPEND (mm->cmd_list, cmd_ptr);
-  POCL_UNLOCK(mm->cmd_lock);
+  //POCL_UNLOCK(mm->cmd_lock);
 }

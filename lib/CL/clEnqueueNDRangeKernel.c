@@ -37,7 +37,7 @@
 #define COMMAND_LENGTH 1024
 #define ARGUMENT_STRING_LENGTH 32
 
-//#define DEBUG_NDRANGE
+#define DEBUG_NDRANGE
 
 CL_API_ENTRY cl_int CL_API_CALL
 POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
@@ -163,9 +163,17 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
   mkdir (tmpdir, S_IRWXU);
 
   
-  error = snprintf
-    (parallel_filename, POCL_FILENAME_LENGTH,
-     "%s/%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
+  const char* wg_method = 
+    pocl_get_string_option("POCL_WORK_GROUP_METHOD", "loopvec");
+  if(strcmp(wg_method,"spmd") == 0){
+    error = snprintf
+      (parallel_filename, POCL_FILENAME_LENGTH,
+       "%s/%s", tmpdir, "parallel_hwacha.bc");
+  }else{
+    error = snprintf
+      (parallel_filename, POCL_FILENAME_LENGTH,
+       "%s/%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
+  }
   if (error < 0)
     return CL_OUT_OF_HOST_MEMORY;
 
@@ -305,9 +313,9 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
     if (!kernel->arg_is_local[i] && kernel->arg_is_pointer[i] && al->value != NULL)
       {
         cl_mem buf;
-#if 0
-        printf ("### retaining arg %d - the buffer %x of kernel %s\n", i, buf, kernel->function_name);
-#endif
+//#if 0
+//printf ("### retaining arg %d - the buffer %x of kernel %s\n", i, buf, kernel->function_name);
+//#endif
         buf = *(cl_mem *) (al->value);
         if (buf != NULL)
           POname(clRetainMemObject) (buf);

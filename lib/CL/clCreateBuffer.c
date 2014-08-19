@@ -38,6 +38,8 @@ POname(clCreateBuffer)(cl_context context,
   int errcode;
   unsigned i, j;
 
+  printf("creating a buffer in pocl handler\n");
+
   if (size == 0)
     {
       errcode = CL_INVALID_BUFFER_SIZE;
@@ -126,6 +128,7 @@ POname(clCreateBuffer)(cl_context context,
       if (size > max_alloc)
         {
           errcode = CL_INVALID_BUFFER_SIZE;
+          printf("size:%d, max_alloc:%d\n",size,max_alloc);
           goto ERROR_CLEAN_MEM;
         }
     }

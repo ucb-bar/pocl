@@ -37,6 +37,7 @@
 
 #define COMMAND_LENGTH 2048
 
+
 /**
  * Generate code from the final bitcode using the LLVM
  * tools.
@@ -49,54 +50,135 @@
 const char*
 llvm_codegen (const char* tmpdir) {
 
+  const char* wg_method = 
+    pocl_get_string_option("POCL_WORK_GROUP_METHOD", "loopvec");
+  const int cross_compile = pocl_get_bool_option("POCL_CROSS_COMPILE", 0);
   const char* pocl_verbose_ptr = 
     pocl_get_string_option("POCL_VERBOSE", (char*)NULL);
   int pocl_verbose = pocl_verbose_ptr && *pocl_verbose_ptr;
+  pocl_verbose = 1;
 
   char command[COMMAND_LENGTH];
   char bytecode[POCL_FILENAME_LENGTH];
   char assembly[POCL_FILENAME_LENGTH];
 
-  char* module = malloc(min(POCL_FILENAME_LENGTH, 
+  char* module;
+  if(strcmp(wg_method,"spmd") == 0){
+    module = malloc(min(POCL_FILENAME_LENGTH, 
+	   strlen(tmpdir) + strlen("/parallel_hwacha.so") + 1)); 
+  }else{
+    module = malloc(min(POCL_FILENAME_LENGTH, 
 	   strlen(tmpdir) + strlen("/parallel.so") + 1)); 
+  }
   int error;
 
-  error = snprintf 
-    (module, POCL_FILENAME_LENGTH,
-     "%s/parallel.so", tmpdir);
-  assert (error >= 0);
+  if(strcmp(wg_method,"spmd") == 0){
+    error = snprintf 
+      (module, POCL_FILENAME_LENGTH,
+       "%s/parallel_hwacha.so", tmpdir);
+    assert (error >= 0);
+  }else{
+    error = snprintf 
+      (module, POCL_FILENAME_LENGTH,
+       "%s/parallel.so", tmpdir);
+    assert (error >= 0);
+  }
 
   if (access (module, F_OK) != 0)
     {
-      error = snprintf (bytecode, POCL_FILENAME_LENGTH,
-                        "%s/%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
-      assert (error >= 0);
+      if(strcmp(wg_method,"spmd") == 0){
+        error = snprintf (bytecode, POCL_FILENAME_LENGTH,
+                          "%s/%s", tmpdir, "parallel_hwacha.bc");
+        assert (error >= 0);
+      }else{
+        error = snprintf (bytecode, POCL_FILENAME_LENGTH,
+                          "%s/%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
+        assert (error >= 0);
+      }
       
-      error = snprintf (assembly, POCL_FILENAME_LENGTH,
-			"%s/parallel.s",
-			tmpdir);
-      assert (error >= 0);
+      if(strcmp(wg_method,"spmd") == 0){
+        error = snprintf (assembly, POCL_FILENAME_LENGTH,
+        "%s/parallel_hwacha.s",
+        tmpdir);
+        assert (error >= 0);
+      }else{
+        error = snprintf (assembly, POCL_FILENAME_LENGTH,
+        "%s/parallel.s",
+        tmpdir);
+        assert (error >= 0);
+      }
       
-      error = snprintf (command, COMMAND_LENGTH,
-			LLC " " HOST_LLC_FLAGS " -o %s %s",
-			assembly,
-			bytecode);
-      assert (error >= 0);
+      if(cross_compile){
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+			    CROSS_LLC " " CROSS_HWACHA_LLC_FLAGS " -o %s %s",
+			    assembly,
+			    bytecode);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+			    CROSS_LLC " " TARGET_LLC_FLAGS " -o %s %s",
+			    assembly,
+			    bytecode);
+          assert (error >= 0);
+        }
+      }else{
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+			    LLC " " HWACHA_LLC_FLAGS " -o %s %s",
+			    assembly,
+			    bytecode);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+			    LLC " " HOST_LLC_FLAGS " -o %s %s",
+			    assembly,
+			    bytecode);
+          assert (error >= 0);
+        }
+      }
       
       if (pocl_verbose) {
         fprintf(stderr, "[pocl] executing [%s]\n", command);
         fflush(stderr);
       }
       error = system (command);
+      perror("system error:");
+      fprintf(stderr, "LLC Error status:%d\n", error);
+      fflush(stderr);
       assert (error == 0);
           
       // For the pthread device, use device type is always the same as
       // the host.
-      error = snprintf (command, COMMAND_LENGTH,
-			CLANG " " HOST_AS_FLAGS " -c -o %s.o %s ",
-			module,
-			assembly);
-      assert (error >= 0);
+      if(cross_compile){
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+          CROSS_CLANG " " CROSS_HWACHA_AS_FLAGS " -v -c -o %s.o %s ",
+          module,
+          assembly);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+          CROSS_CLANG " " TARGET_AS_FLAGS " -v -c -o %s.o %s ",
+          module,
+          assembly);
+          assert (error >= 0);
+        }
+      }else{
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+          CLANG " " HWACHA_AS_FLAGS " -v -c -o %s.o %s ",
+          module,
+          assembly);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+          CLANG " " HOST_AS_FLAGS " -v -c -o %s.o %s ",
+          module,
+          assembly);
+          assert (error >= 0);
+        }
+      }
       
       if (pocl_verbose) {
         fprintf(stderr, "[pocl] executing [%s]\n", command);
@@ -106,12 +188,39 @@ llvm_codegen (const char* tmpdir) {
       assert (error == 0);
 
       // clang is used as the linker driver in LINK_CMD
-      error = snprintf (command, COMMAND_LENGTH,
-                       LINK_CMD " " HOST_CLANG_FLAGS " " HOST_LD_FLAGS " "
-                        "-o %s %s.o",
-                       module,
-                       module);
-      assert (error >= 0);
+      if(cross_compile){
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+                           CROSS_LINK_CMD " " CROSS_HWACHA_CLANG_FLAGS " " CROSS_HWACHA_LD_FLAGS " "
+                            "-v -o %s %s.o",
+                           module,
+                           module);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+                           CROSS_LINK_CMD " " TARGET_CLANG_FLAGS " " TARGET_LD_FLAGS " "
+                            "-v -o %s %s.o",
+                           module,
+                           module);
+          assert (error >= 0);
+        }
+      }else{
+        if(strcmp(wg_method,"spmd") == 0){
+          error = snprintf (command, COMMAND_LENGTH,
+                           LINK_CMD " " HWACHA_CLANG_FLAGS " " HWACHA_LD_FLAGS " "
+                            "-v -o %s %s.o",
+                           module,
+                           module);
+          assert (error >= 0);
+        }else{
+          error = snprintf (command, COMMAND_LENGTH,
+                           LINK_CMD " " HOST_CLANG_FLAGS " " HOST_LD_FLAGS " "
+                            "-v -o %s %s.o",
+                           module,
+                           module);
+          assert (error >= 0);
+        }
+      }
 
       if (pocl_verbose) {
         fprintf(stderr, "[pocl] executing [%s]\n", command);

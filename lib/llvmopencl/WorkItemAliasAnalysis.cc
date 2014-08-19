@@ -29,6 +29,8 @@
 #include "config.h"
 #include <iostream>
 
+#include "WorkItemAliasAnalysis.h"
+
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Pass.h"
@@ -41,35 +43,8 @@
 #endif
 
 using namespace llvm;
+using namespace pocl;
 
-namespace {
-/// WorkItemAliasAnalysis - This is a simple alias analysis
-/// implementation that uses pocl metadata to make sure memory accesses from
-/// different work items are not aliasing.
-class WorkItemAliasAnalysis : public ImmutablePass, public AliasAnalysis {
-public:
-    static char ID; 
-    WorkItemAliasAnalysis() : ImmutablePass(ID) {}
-
-    /// getAdjustedAnalysisPointer - This method is used when a pass implements
-    /// an analysis interface through multiple inheritance.  If needed, it
-    /// should override this to adjust the this pointer as needed for the
-    /// specified pass info.
-    virtual void *getAdjustedAnalysisPointer(AnalysisID PI) {
-        if (PI == &AliasAnalysis::ID)
-            return (AliasAnalysis*)this;
-        return this;
-    }
-    virtual void initializePass() {
-        InitializeAliasAnalysis(this);
-    }
-    
-    private:
-        virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-        virtual AliasResult alias(const Location &LocA, const Location &LocB);
-
-    };
-}
 
 // Register this pass...
 char WorkItemAliasAnalysis::ID = 0;

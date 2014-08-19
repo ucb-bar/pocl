@@ -50,14 +50,14 @@ env_data* find_env (env_data* cache, const char* key)
   /* if cache is empty -> it is not initialized */ 
   if (env_cache == NULL)
     {
-      POCL_INIT_LOCK(lock);
+      //POCL_INIT_LOCK(lock);
     }
-  POCL_LOCK(lock);
+  //POCL_LOCK(lock);
   LL_FOREACH(cache, ed)
     {
       if (strcmp(ed->env, key) == 0)
         {
-          POCL_UNLOCK(lock);
+          //POCL_UNLOCK(lock);
           return ed;
         }
     }
@@ -68,11 +68,11 @@ env_data* find_env (env_data* cache, const char* key)
       ed->value = strdup (value);
       ed->next = NULL;
       LL_PREPEND(env_cache, ed);
-      POCL_UNLOCK(lock);
+      //POCL_UNLOCK(lock);
       return ed;
     }
   
-  POCL_UNLOCK(lock);
+  //POCL_UNLOCK(lock);
   return NULL;
 }
 /* Can be used to query if the given option has been set by the user. */

@@ -25,6 +25,8 @@
 #include "pocl_cl.h"
 #include "install-paths.h"
 #include <assert.h>
+#include <errno.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -182,6 +184,7 @@ CL_API_SUFFIX__VERSION_1_0
 
   if (program->binaries == NULL)
     {
+      printf("program-binaries was null\n");
       snprintf (tmpdir, POCL_FILENAME_LENGTH, "%s/", program->temp_dir);
       mkdir (tmpdir, S_IRWXU);
 
@@ -214,6 +217,7 @@ CL_API_SUFFIX__VERSION_1_0
             (binary_file_name, POCL_FILENAME_LENGTH, "%s/%s", 
              device_tmpdir, POCL_PROGRAM_BC_FILENAME);
 
+          printf("about to build program\n");
           error = pocl_llvm_build_program
               (program, device, device_i, tmpdir,
                binary_file_name, device_tmpdir,
@@ -272,7 +276,11 @@ CL_API_SUFFIX__VERSION_1_0
           MEM_ASSERT(count >= POCL_FILENAME_LENGTH, ERROR_CLEAN_PROGRAM);
 
           error = mkdir (device_tmpdir, S_IRWXU);
-          MEM_ASSERT(error, ERROR_CLEAN_PROGRAM);
+          int errsv = errno;
+          if(error == -1 && errsv != EEXIST){ 
+            //ignore the error if it failed due to an already existing dir
+            MEM_ASSERT(error, ERROR_CLEAN_PROGRAM);
+          }
 
           count = snprintf 
             (binary_file_name, POCL_FILENAME_LENGTH, "%s/%s", 

@@ -38,12 +38,14 @@ POname(clSetKernelArg)(cl_kernel kernel,
   struct pocl_argument *p;
   void *value;
   
+  printf("checking for null kernel\n");
   if (kernel == NULL)
     return CL_INVALID_KERNEL;
 
   if (arg_index >= kernel->num_args)
     return CL_INVALID_ARG_INDEX;
   
+  printf("checking for null dyn_args\n");
   if (kernel->dyn_arguments == NULL)
     return CL_INVALID_KERNEL;
 

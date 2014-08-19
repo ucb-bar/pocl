@@ -79,7 +79,9 @@ LD_FLAGS_BIN=""
 # LLVM configuration
 #
 AC_ARG_VAR([LLVM_CONFIG], [Program used to retrieve LLVM options and binaries])
+AC_ARG_VAR([LLVM_CONFIG_TARGET], [Program used to retrieve LLVM target libraries for cross-compile ])
 AC_PATH_PROGS([LLVM_CONFIG], [llvm-config llvm-config-mp-3.3 llvm-config-3.3 llvm-config33 llvm-config-mp-3.4 llvm-config-3.4 llvm-config34 llvm-config-mp-3.2 llvm-config-3.2 llvm-config32 ])
+AC_PATH_PROGS([LLVM_CONFIG_TARGET], [llvm-config-host llvm-config-host-mp-3.3 llvm-config-host-3.3 llvm-config-host33 llvm-config-host-mp-3.4 llvm-config-host-3.4 llvm-config-host34 llvm-config-host-mp-3.2 llvm-config-host-3.2 llvm-config-host32 ])
 test -z "$LLVM_CONFIG" && AC_MSG_FAILURE([no llvm-config found in \$PATH])
 
 LLVM_VERSION=`$LLVM_CONFIG --version`
@@ -126,7 +128,7 @@ AC_ARG_ENABLE([static-llvm],
 LLVM_SHARED_LIB_FILE=$LLVM_LIBDIR/libLLVM-$LLVM_VERSION$LIBRARY_SUFFIX
 
 if test "$link_llvm_static" = "yes"; then
-  LLVM_LIBS=$($LLVM_CONFIG --libfiles)
+  LLVM_LIBS=$($LLVM_CONFIG_TARGET --libfiles)
 else
   LLVM_LIBS=-lLLVM-$LLVM_VERSION
 if test ! -e $LLVM_SHARED_LIB_FILE;
@@ -637,7 +639,7 @@ LLVM_PROG_WARN([CLANGXX], [clang++])
 # Test features of clang
 # -can it compile a simple program
 # -was LLVM built with NDEBUG or not
-if test ! -z "$CLANGXX"; then
+if test ! -z "$CLANGXX_BUILD"; then
 
 AC_LANG([C++])
 
@@ -909,11 +911,15 @@ case $host_cpu in
 
   riscv*)
     AC_MSG_NOTICE([using the riscv optimized kernel lib for the native device])
-    HOST_LD_FLAGS="$HOST_LD_FLAGS -lm"
+    HWACHA_LD_FLAGS="$HOST_LD_FLAGS -Llib -rpath lib -lm -Wl,-fpic"
+    HOST_LD_FLAGS="$HOST_LD_FLAGS -Llib -rpath lib -lm"
+    HWACHA_AS_FLAGS="$HOST_AS_FLAGS -Wa,-march=RVIMAFDXhwacha -Wa,-fpic"
+
     llc_triple="riscv-unknown-linux-gnu"
     llc_host_cpu="RV64IAMFD"
+    llc_hwacha_cpu="RV64IAMFDXHwacha"
     CL_DEVICE_ADDRESS_BITS=64
-    #TODO: not all PowerPCs have Altivec?
+    HWACHA_LLC_FLAGS="$HOST_LLC_FLAGS -march=riscv -mattr=+RV64,+a,+m,+f,+d,+xhwacha --disable-lsr"
     HOST_LLC_FLAGS="$HOST_LLC_FLAGS -march=riscv -mattr=+RV64,+a,+m,+f,+d"
     CLANG_MARCH_FLAG="mriscv"
     ;;
@@ -937,6 +943,26 @@ case $host_cpu in
     ;;
 esac
 
+case $target_cpu in
+  riscv)
+    clang_cross_triple="riscv"
+    llc_cross_triple="riscv-unknown-linux-gnu"
+    llc_hwacha_cpu="RV64IAMFDXHwacha"
+    CROSS_LLC="llc"
+    CROSS_CLANG="clang"
+    TARGET_LLC_FLAGS="$HOST_LLC_FLAGS -march=riscv -mattr=+RV64,+a,+m,+f,+d"
+    TARGET_AS_FLAGS="$HOST_AS_FLAGS -target riscv -Wa,-march=RVIMAFD -Wa,-fpic"
+    TARGET_CLANG_FLAGS="${CLANG_TARGET_OPTION}$clang_cross_triple"
+    TARGET_CLANG_MARCH_FLAG="mriscv"
+    TARGET_LD_FLAGS="$HOST_LD_FLAGS -target riscv -Wl,-melf64lriscv -Llib -rpath lib -lm -Wl,-fpic"
+    CROSS_HWACHA_CLANG_FLAGS="$TARGET_CLANG_FLAGS -$TARGET_CLANG_MARCH_FLAG=$llc_hwacha_cpu"
+    CROSS_HWACHA_LLC_FLAGS="$TARGET_LLC_FLAGS -mattr=+xhwacha --disable-lsr"
+    CROSS_HWACHA_AS_FLAGS="$HOST_AS_FLAGS -target riscv -Wa,-march=RVIMAFDXhwacha -Wa,-fpic"
+    CROSS_HWACHA_LD_FLAGS="$TARGET_LD_FLAGS"
+    ;;
+  *)
+  ;;
+esac
 
 kernel_dir="host"
 OCL_TARGETS=$kernel_dir
@@ -944,7 +970,9 @@ HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS ${CLANG_TARGET_OPTION}$llc_triple"
 HOST_LLC_FLAGS="$HOST_LLC_FLAGS -mtriple=$llc_triple"
 if test "$llc_host_cpu" != "(unknown)"
 then
+  HWACHA_CLANG_FLAGS="$HWACHA_CLANG_FLAGS -$CLANG_MARCH_FLAG=$llc_hwacha_cpu"
   HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -$CLANG_MARCH_FLAG=$llc_host_cpu"
+  HWACHA_LLC_FLAGS="$HWACHA_LLC_FLAGS -mcpu=$llc_hwacha_cpu"
   HOST_LLC_FLAGS="$HOST_LLC_FLAGS -mcpu=$llc_host_cpu"
 fi
 
@@ -964,6 +992,10 @@ AC_DEFINE_UNQUOTED([KERNEL_DIR], "$kernel_dir", [Use the libkernel from lib/kern
 
 AC_SUBST([TARGET], [$target])
 AC_DEFINE_UNQUOTED([TARGET], "$target", [The target triple.])
+AC_SUBST([CROSS_CLANG])
+AC_DEFINE_UNQUOTED([CROSS_CLANG], "$CROSS_CLANG", [The cross compiling clang.])
+AC_SUBST([CROSS_LLC])
+AC_DEFINE_UNQUOTED([CROSS_LLC], "$CROSS_LLC", [The cross compiling llc.])
 AC_SUBST([TARGET_CPU], [$target_cpu])
 AC_ARG_VAR([TARGET_CLANG_FLAGS],
            [Parameters to for target compilation.])
@@ -973,7 +1005,15 @@ AC_DEFINE_UNQUOTED([TARGET_CLANG_FLAGS],
 AC_SUBST([TARGET_LLC_FLAGS])
 AC_DEFINE_UNQUOTED([TARGET_LLC_FLAGS],
                    ["$TARGET_LLC_FLAGS"], 
-                   [Parameters to llc for code generation in the target.])
+                   [Parameters to llc for code generation for the target.])
+AC_SUBST([TARGET_AS_FLAGS])
+AC_DEFINE_UNQUOTED([TARGET_AS_FLAGS],
+                   ["$TARGET_AS_FLAGS"], 
+                   [Parameters to as for assembling for the target.])
+AC_SUBST([TARGET_LD_FLAGS])
+AC_DEFINE_UNQUOTED([TARGET_LD_FLAGS],
+                   ["$TARGET_LD_FLAGS"], 
+                   [Parameters to ld for linking for the target.])
 
 AC_SUBST([HOST], [$host])
 AC_DEFINE_UNQUOTED([HOST], "$host", [The host triple.])
@@ -1003,6 +1043,38 @@ AC_SUBST([HOST_LD_FLAGS])
 AC_DEFINE_UNQUOTED([HOST_LD_FLAGS],
                    ["$HOST_LD_FLAGS"],
                    [Parameter to compiler to generate loadable module.])
+AC_ARG_VAR([HWACHA_CLANG_FLAGS])
+AC_DEFINE_UNQUOTED([HWACHA_CLANG_FLAGS],
+                   ["$HWACHA_CLANG_FLAGS"],
+                   [Parameters to for hwacha compilation.])
+AC_ARG_VAR([HWACHA_LLC_FLAGS])
+AC_DEFINE_UNQUOTED([HWACHA_LLC_FLAGS],
+                   ["$HWACHA_LLC_FLAGS"], 
+                   [Parameters to llc for code generation in the hwacha.])
+AC_ARG_VAR([HWACHA_AS_FLAGS])
+AC_DEFINE_UNQUOTED([HWACHA_AS_FLAGS],
+                   ["$HWACHA_AS_FLAGS"], 
+                   [Parameters to as for code generation in the hwacha.])
+AC_SUBST([HWACHA_LD_FLAGS])
+AC_DEFINE_UNQUOTED([HWACHA_LD_FLAGS],
+                   ["$HWACHA_LD_FLAGS"],
+                   [Parameter to compiler to generate hwacha loadable module.])
+AC_ARG_VAR([CROSS_HWACHA_CLANG_FLAGS])
+AC_DEFINE_UNQUOTED([CROSS_HWACHA_CLANG_FLAGS],
+                   ["$CROSS_HWACHA_CLANG_FLAGS"],
+                   [Parameters to for hwacha compilation.])
+AC_ARG_VAR([CROSS_HWACHA_LLC_FLAGS])
+AC_DEFINE_UNQUOTED([CROSS_HWACHA_LLC_FLAGS],
+                   ["$CROSS_HWACHA_LLC_FLAGS"], 
+                   [Parameters to llc for code generation in the hwacha.])
+AC_ARG_VAR([CROSS_HWACHA_AS_FLAGS])
+AC_DEFINE_UNQUOTED([CROSS_HWACHA_AS_FLAGS],
+                   ["$CROSS_HWACHA_AS_FLAGS"], 
+                   [Parameters to as for code generation in the hwacha.])
+AC_SUBST([CROSS_HWACHA_LD_FLAGS])
+AC_DEFINE_UNQUOTED([CROSS_HWACHA_LD_FLAGS],
+                   ["$HWACHA_LD_FLAGS"],
+                   [Parameter to compiler to generate hwacha loadable module.])
 
 AC_SUBST([POCL_DEVICE_ADDRESS_BITS], [$CL_DEVICE_ADDRESS_BITS])
 AC_DEFINE_UNQUOTED([POCL_DEVICE_ADDRESS_BITS],

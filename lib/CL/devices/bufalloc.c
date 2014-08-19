@@ -118,14 +118,14 @@ append_new_chunk (memory_region_t *region,
 {
 
   chunk_info_t* new_chunk = NULL;
-  BA_LOCK (region->lock);
+  //BA_LOCK (region->lock);
 
   assert (!region->last_chunk->is_allocated);
   /* if the last_chunk is too small we cannot append
      a new chunk before it */
   if (chunk_slack (region->last_chunk, size) < 0)
     {
-      BA_UNLOCK (region->lock);
+      //BA_UNLOCK (region->lock);
       return NULL;
     }
 
@@ -135,7 +135,7 @@ append_new_chunk (memory_region_t *region,
 
   if (new_chunk == NULL)
     {
-      BA_UNLOCK (region->lock);
+      //BA_UNLOCK (region->lock);
       return NULL;
     } 
   else 
@@ -167,7 +167,7 @@ append_new_chunk (memory_region_t *region,
   printf ("\n");
 #endif
   
-  BA_UNLOCK (region->lock);
+  //BA_UNLOCK (region->lock);
 
   return new_chunk;
 }
@@ -193,7 +193,7 @@ alloc_buffer_from_region (memory_region_t *region, size_t size)
       if (chunk != NULL) return chunk;
     }
 
-  BA_LOCK (region->lock);
+  //BA_LOCK (region->lock);
   
   DL_FOREACH (region->chunks, cursor) 
     {
@@ -213,7 +213,7 @@ alloc_buffer_from_region (memory_region_t *region, size_t size)
       break;
     }
 
-  BA_UNLOCK (region->lock);
+  //BA_UNLOCK (region->lock);
 
   if (chunk == NULL && region->strategy != BALLOCS_WASTEFUL) 
     {
@@ -320,14 +320,14 @@ free_buffer (memory_region_t *regions, memory_address_t addr)
   LL_FOREACH (regions, region) 
     {
       chunk_info_t *chunk = NULL;
-      BA_LOCK (region->lock);
+      //BA_LOCK (region->lock);
       DL_FOREACH (region->chunks, chunk)
         {
           if (chunk->start_address == addr) 
             {
               chunk->is_allocated = 0;
               coalesce_chunks (coalesce_chunks (chunk->prev, chunk), chunk->next);
-              BA_UNLOCK (region->lock);
+              //BA_UNLOCK (region->lock);
 #ifdef DEBUG_BUFALLOC
               printf ("#### region %x after free_buffer at addr %x\n", 
                       region, addr);
@@ -337,7 +337,7 @@ free_buffer (memory_region_t *regions, memory_address_t addr)
               return region;
             }
         }
-      BA_UNLOCK (region->lock);
+      //BA_UNLOCK (region->lock);
     }
   return NULL;
 }
@@ -352,10 +352,10 @@ void
 free_chunk (chunk_info_t* chunk) 
 {
   memory_region_t *region = chunk->parent_region;
-  BA_LOCK (region->lock);
+  //BA_LOCK (region->lock);
   chunk->is_allocated = 0;
   coalesce_chunks (coalesce_chunks (chunk->prev, chunk), chunk->next);
-  BA_UNLOCK (region->lock);
+  //BA_UNLOCK (region->lock);
 
 #ifdef DEBUG_BUFALLOC
   printf ("#### after free_chunk (%x)\n", chunk);
@@ -374,7 +374,7 @@ void
 init_mem_region (memory_region_t *region, memory_address_t start, size_t size)
 {
   int i;
-  BA_INIT_LOCK (region->lock);
+  //BA_INIT_LOCK (region->lock);
 
   region->strategy = BALLOCS_WASTEFUL;
   region->chunks = NULL;

@@ -51,7 +51,7 @@
 
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/MutexGuard.h"
+//#include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
@@ -75,6 +75,28 @@
 #include "pocl_runtime_config.h"
 #include "install-paths.h"
 #include "LLVMUtils.h"
+
+// Include pass headers for static ID lookup
+//TODO: only do this if static is enabled?
+#include "WorkitemHandlerChooser.h"
+#include "BreakConstantGEPs.h"
+#include "AutomaticLocals.h"
+#include "Flatten.h"
+#include "PHIsToAllocas.h"
+#include "IsolateRegions.h"
+#include "VariableUniformityAnalysis.h"
+#include "ImplicitLoopBarriers.h"
+#include "ImplicitConditionalBarriers.h"
+#include "LoopBarriers.h"
+#include "BarrierTailReplication.h"
+#include "CanonicalizeBarriers.h"
+#include "IsolateRegions.h"
+#include "WorkItemAliasAnalysis.h"
+#include "WorkitemReplication.h"
+#include "WorkitemLoops.h"
+#include "AllocasToEntry.h"
+#include "Workgroup.h"
+#include "TargetAddressSpaces.h"
 
 using namespace clang;
 using namespace llvm;
@@ -102,7 +124,7 @@ static LLVMContext *globalContext=NULL;
    ensure only one thread is using this layer at the time with a mutex. */
 //static pocl_lock_t kernel_compiler_lock = POCL_LOCK_INITIALIZER;
 
-static llvm::sys::Mutex kernelCompilerLock;
+//static llvm::sys::Mutex kernelCompilerLock;
 
 //#define DEBUG_POCL_LLVM_API
 
@@ -163,7 +185,7 @@ int pocl_llvm_build_program(cl_program program,
                             const char* user_options)
 
 { 
-  llvm::MutexGuard lockHolder(kernelCompilerLock);
+  //llvm::MutexGuard lockHolder(kernelCompilerLock);
 
   /* TODO: This should be in a initialization function somewhere. */
   if (globalContext==NULL)
@@ -207,6 +229,7 @@ int pocl_llvm_build_program(cl_program program,
   // the 'barrier' function to prevent them.
   // ss << "-O2 ";
 
+  ss << "-v ";
   ss << "-x cl ";
   // Remove the inline keywords to force the user functions
   // to be included in the program. Otherwise they will
@@ -223,8 +246,11 @@ int pocl_llvm_build_program(cl_program program,
   // This is required otherwise the initialization fails with
   // unknown triplet ''
   ss << "-triple=" << device->llvm_target_triplet << " ";
+  //if (device->llvm_target_arch != NULL)
+    //ss << "-target " << device->llvm_target_arch << " ";
   if (device->llvm_cpu != NULL)
     ss << "-target-cpu " << device->llvm_cpu << " ";
+
   ss << user_options << " ";
   std::istream_iterator<std::string> begin(ss);
   std::istream_iterator<std::string> end;
@@ -245,6 +271,7 @@ int pocl_llvm_build_program(cl_program program,
 #ifdef DEBUG_POCL_LLVM_API
   // TODO: for some reason the user_options are replicated,
   // they appear twice in a row in the output
+  // the above todo is because a few lines before this they do ss << user_options so ss already contatins user_options
   std::cerr << "### options: " << ss.str() 
             << "user_options: " << user_options << std::endl;
 #endif
@@ -267,6 +294,7 @@ int pocl_llvm_build_program(cl_program program,
         }
       return CL_INVALID_BUILD_OPTIONS;
     }
+   std::cout << "Created compiler invocation from Args\n";
   
   LangOptions *la = pocl_build.getLangOpts();
   pocl_build.setLangDefaults
@@ -313,8 +341,13 @@ int pocl_llvm_build_program(cl_program program,
   ta.Triple = device->llvm_target_triplet;
   if (device->llvm_cpu != NULL)
     ta.CPU = device->llvm_cpu;
+  //if (device->llvm_target_features != NULL)
+    //ta.Features = device->llvm_target_features;
 
-  // printf("### Triple: %s, CPU: %s\n", ta.Triple.c_str(), ta.CPU.c_str());
+  //printf("### Triple: %s, CPU: %s, Features: ", ta.Triple.c_str(), ta.CPU.c_str());
+  //for(std::vector<std::string>::iterator it = ta.Features.begin(); it != ta.Features.end(); ++it)
+    //printf("%s ", *it);
+  //printf("\n");
 
   // FIXME: print out any diagnostics to stdout for now. These should go to a buffer for the user
   // to dig out. (and probably to stdout too, overridable with environment variables) 
@@ -340,6 +373,7 @@ int pocl_llvm_build_program(cl_program program,
 
   bool success = true;
   clang::CodeGenAction *action = NULL;
+  CI.setInvocation(&pocl_build);
   action = new clang::EmitLLVMOnlyAction(globalContext);
   success |= CI.ExecuteAction(*action);
   // FIXME: memleak, see FIXME below
@@ -350,7 +384,7 @@ int pocl_llvm_build_program(cl_program program,
     delete (llvm::Module*)*mod;
   *mod = action->takeModule();
 
-  if (!pocl_get_bool_option("POCL_LEAVE_TEMP_DIRS", 0))
+  if (!pocl_get_bool_option("POCL_LEAVE_TEMP_DIRS", 1))
     write_temporary_file(*mod, binary_file_name);
 
   // FIXME: cannot delete action as it contains something the llvm::Module
@@ -578,6 +612,9 @@ int pocl_llvm_get_kernel_metadata(cl_program program,
   std::string kobj_s = descriptor_filename; 
   kobj_s += ".kernel_obj.c"; 
   FILE *kobj_c = fopen( kobj_s.c_str(), "wc");
+  if(!kobj_c){
+     perror("");
+  }
  
   fprintf(kobj_c, "\n #include <pocl_device.h>\n");
 
@@ -727,6 +764,15 @@ static PassManager& kernel_compiler_passes
       initializeInstCombine(Registry);
       initializeInstrumentation(Registry);
       initializeTarget(Registry);
+
+      //Make sure we are registering the passes in this folder
+/*
+      const char *Name = "Finds the best way to handle work-items to produce a multi-WG function.";
+      PassInfo *PI = new PassInfo(Name, "workitem-handler-chooser",
+                                  &pocl::WorkitemHandlerChooser::ID,
+                                  0, false, false);
+      Registry.registerPass(*PI, true);
+*/
     }
 
 #ifndef LLVM_3_2
@@ -800,7 +846,7 @@ static PassManager& kernel_compiler_passes
   passes.push_back("workitemloops");
   passes.push_back("allocastoentry");
   passes.push_back("workgroup");
-  passes.push_back("target-address-spaces");
+  //passes.push_back("target-address-spaces");
 
   /* This is a beginning of the handling of the fine-tuning parameters.
    * TODO: POCL_KERNEL_COMPILER_OPT_SWITCH
@@ -834,6 +880,15 @@ static PassManager& kernel_compiler_passes
           llvm::cl::Option *O = opts["vectorizer-min-trip-count"];
           assert(O && "could not find LLVM option 'vectorizer-min-trip-count'");
           O->addOccurrence(1, StringRef("vectorizer-min-trip-count"), StringRef("2"), false); 
+
+          //add force vector width for testing
+          O = opts["force-vector-width"];
+          assert(O && "could not find LLVM option 'force-vector-width'");
+          O->addOccurrence(1, StringRef("force-vector-width"), StringRef("4"), false); 
+          //add other opts for debugging
+          O = opts["debug-pass"];
+          assert(O && "could not find LLVM option 'debug-pass'");
+          O->addOccurrence(1, StringRef("debug-pass"), StringRef("Arguments"), false); 
 
           if (SCALARIZE) 
             {
@@ -899,10 +954,101 @@ static PassManager& kernel_compiler_passes
 #endif
         }
 
+    }else if(wg_method == "spmd"){
+      //remove all passes added so far
+      passes.clear();
+      passes.push_back("mem2reg");
+      passes.push_back("domtree");
+      passes.push_back("workitem-handler-chooser");
+      passes.push_back("break-constgeps");
+      passes.push_back("automatic-locals");
+      passes.push_back("flatten");
+      passes.push_back("always-inline");
+      passes.push_back("globaldce");
+      passes.push_back("simplifycfg");
+      passes.push_back("loop-simplify");
+      passes.push_back("phistoallocas");
+      passes.push_back("isolate-regions");
+      passes.push_back("uniformity");
+      passes.push_back("implicit-loop-barriers");
+      passes.push_back("implicit-cond-barriers");
+      passes.push_back("loop-barriers");
+      passes.push_back("barriertails");
+      passes.push_back("barriers");
+      passes.push_back("isolate-regions");
+      passes.push_back("wi-aa");
+      passes.push_back("workitemrepl");
+      passes.push_back("workitemloops");
+      passes.push_back("allocastoentry");
+      passes.push_back("workgroup");
+
+      passes.push_back("globalopt");
+      passes.push_back("ipsccp");
+      passes.push_back("deadargelim");
+      passes.push_back("instcombine");
+      passes.push_back("simplifycfg");
+      passes.push_back("basiccg");
+      passes.push_back("prune-eh");
+      passes.push_back("functionattrs");
+      passes.push_back("argpromotion");
+      passes.push_back("sroa");
+      passes.push_back("domtree");
+      passes.push_back("early-cse");
+      passes.push_back("lazy-value-info");
+      passes.push_back("jump-threading");
+      passes.push_back("correlated-propagation");
+      passes.push_back("simplifycfg");
+      passes.push_back("instcombine");
+      passes.push_back("tailcallelim");
+      passes.push_back("simplifycfg");
+      passes.push_back("reassociate");
+      passes.push_back("domtree");
+      passes.push_back("loops");
+      passes.push_back("loop-simplify");
+      passes.push_back("lcssa");
+      passes.push_back("loop-rotate");
+      passes.push_back("licm");
+      passes.push_back("lcssa");
+      passes.push_back("loop-unswitch");
+      passes.push_back("instcombine");
+      passes.push_back("scalar-evolution");
+      passes.push_back("loop-simplify");
+      passes.push_back("lcssa");
+      passes.push_back("indvars");
+      passes.push_back("loop-idiom");
+      passes.push_back("loop-deletion");
+      //passes.push_back("loop-unroll");
+      passes.push_back("memdep");
+      passes.push_back("gvn");
+      passes.push_back("memdep");
+      passes.push_back("memcpyopt");
+      passes.push_back("sccp");
+      passes.push_back("instcombine");
+      passes.push_back("lazy-value-info");
+      passes.push_back("jump-threading");
+      passes.push_back("correlated-propagation");
+      passes.push_back("domtree");
+      passes.push_back("memdep");
+      passes.push_back("dse");
+      passes.push_back("adce");
+      passes.push_back("simplifycfg");
+      passes.push_back("instcombine");
+      passes.push_back("strip-dead-prototypes");
+      passes.push_back("globaldce");
+      passes.push_back("constmerge");
+
+      llvm::cl::Option *O = opts["unroll-count"];
+ //     assert(O && "could not find LLVM option 'unroll-count'");
+  //    O->addOccurrence(1, StringRef("unroll-count"), StringRef("0"), false); 
+          //add other opts for debugging
+          O = opts["debug-pass"];
+          assert(O && "could not find LLVM option 'debug-pass'");
+          O->addOccurrence(1, StringRef("debug-pass"), StringRef("Arguments"), false); 
     }
 #endif
 
-  passes.push_back("STANDARD_OPTS");
+  if(wg_method!= "spmd")
+    passes.push_back("STANDARD_OPTS");
   passes.push_back("instcombine");
 
   // Now actually add the listed passes to the PassManager.
@@ -926,6 +1072,7 @@ static PassManager& kernel_compiler_passes
         }
 
       const PassInfo *PIs = Registry.getPassInfo(StringRef(passes[i]));
+      
       if(PIs)
         {
           //std::cout << "-"<<passes[i] << " ";
@@ -934,8 +1081,63 @@ static PassManager& kernel_compiler_passes
         }
       else
         {
-          std::cerr << "Failed to create kernel compiler pass " << passes[i] << std::endl;
-          POCL_ABORT("FAIL");
+          //Lookup passes using more static friendly method
+          //TODO: figure out why we need to do this
+          if(passes[i] == "workitem-handler-chooser")
+            PIs = Registry.getPassInfo(&pocl::WorkitemHandlerChooser::ID);
+          if(passes[i] == "break-constgeps")
+            PIs = Registry.getPassInfo(&BreakConstantGEPs::ID);
+          if(passes[i] == "automatic-locals")
+            PIs = Registry.getPassInfo(&pocl::AutomaticLocals::ID);
+          if(passes[i] == "flatten")
+            PIs = Registry.getPassInfo(&pocl::Flatten::ID);
+          //if(passes[i] == "always-inline")
+            //PIs = Registry.getPassInfo(&pocl::AlwaysInline::ID);
+          //if(passes[i] == "globaldce")
+            //PIs = Registry.getPassInfo(&pocl::GlobalDCE::ID);
+          //if(passes[i] == "simplifycfg")
+            //PIs = Registry.getPassInfo(&pocl::SimplifyCFG::ID);
+          //if(passes[i] == "loop-simplify")
+            //PIs = Registry.getPassInfo(&pocl::LoopSimplify::ID);
+          if(passes[i] == "phistoallocas")
+            PIs = Registry.getPassInfo(&pocl::PHIsToAllocas::ID);
+          if(passes[i] == "isolate-regions")
+            PIs = Registry.getPassInfo(&pocl::IsolateRegions::ID);
+          if(passes[i] == "uniformity")
+            PIs = Registry.getPassInfo(&pocl::VariableUniformityAnalysis::ID);
+          if(passes[i] == "implicit-loop-barriers")
+            PIs = Registry.getPassInfo(&pocl::ImplicitLoopBarriers::ID);
+          if(passes[i] == "implicit-cond-barriers")
+            PIs = Registry.getPassInfo(&pocl::ImplicitConditionalBarriers::ID);
+          if(passes[i] == "loop-barriers")
+            PIs = Registry.getPassInfo(&pocl::LoopBarriers::ID);
+          if(passes[i] == "barriertails")
+            PIs = Registry.getPassInfo(&pocl::BarrierTailReplication::ID);
+          if(passes[i] == "barriers")
+            PIs = Registry.getPassInfo(&pocl::CanonicalizeBarriers::ID);
+          if(passes[i] == "isolate-regions")
+            PIs = Registry.getPassInfo(&pocl::IsolateRegions::ID);
+          if(passes[i] == "wi-aa")
+            PIs = Registry.getPassInfo(&pocl::WorkItemAliasAnalysis::ID);
+          if(passes[i] == "workitemrepl")
+            PIs = Registry.getPassInfo(&pocl::WorkitemReplication::ID);
+          if(passes[i] == "workitemloops")
+            PIs = Registry.getPassInfo(&pocl::WorkitemLoops::ID);
+          if(passes[i] == "allocastoentry")
+            PIs = Registry.getPassInfo(&pocl::AllocasToEntry::ID);
+          if(passes[i] == "workgroup")
+            PIs = Registry.getPassInfo(&pocl::Workgroup::ID);
+          if(passes[i] == "target-address-spaces")
+            PIs = Registry.getPassInfo(&pocl::TargetAddressSpaces::ID);
+            
+          if(PIs){
+            std::cout << "Used ID lookup for " << passes[i] << std::endl;
+            Pass *thispass = PIs->createPass();
+            Passes->add(thispass);
+          }else{
+            std::cerr << "Failed to create kernel compiler pass " << passes[i] << std::endl;
+            POCL_ABORT("FAIL");
+          }
         }
     }
   kernel_compiler_passes[device] = Passes;
@@ -956,7 +1158,7 @@ static llvm::Module*
 kernel_library
 (cl_device_id device, llvm::Module* root)
 {
-  llvm::MutexGuard lockHolder(kernelCompilerLock);
+  //llvm::MutexGuard lockHolder(kernelCompilerLock);
 
   static std::map<cl_device_id, llvm::Module*> libs;
 
@@ -1017,7 +1219,7 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device,
                                           const char* parallel_filename,
                                           const char* kernel_filename)
 {
-  llvm::MutexGuard lockHolder(kernelCompilerLock);
+  //llvm::MutexGuard lockHolder(kernelCompilerLock);
 
 #ifdef DEBUG_POCL_LLVM_API        
   printf("### calling the kernel compiler for kernel %s local_x %u "
@@ -1070,7 +1272,9 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device,
   pocl::LocalSize.addValue(local_z);
   KernelName = kernel->name;
 
+  //printf("start kernel_compiler_passes\n");
   kernel_compiler_passes(device, linked_bc->getDataLayout()).run(*linked_bc);
+  //printf("finished kernel_compiler_passes\n");
 
   // TODO: don't write this once LLC is called via API, not system()
   write_temporary_file(linked_bc, parallel_filename);
@@ -1088,7 +1292,7 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device,
 
 void pocl_llvm_update_binaries (cl_program program) {
 
-  llvm::MutexGuard lockHolder(kernelCompilerLock);
+  //llvm::MutexGuard lockHolder(kernelCompilerLock);
 
   // Dump the LLVM IR Modules to memory buffers. 
   assert (program->llvm_irs != NULL);
@@ -1138,7 +1342,7 @@ void pocl_llvm_update_binaries (cl_program program) {
 int
 pocl_llvm_get_kernel_names( cl_program program, const char **knames, unsigned max_num_krn )
 {
-  llvm::MutexGuard lockHolder(kernelCompilerLock);
+  //llvm::MutexGuard lockHolder(kernelCompilerLock);
 
   // TODO: is it safe to assume every device (i.e. the index 0 here)
   // has the same set of programs & kernels?

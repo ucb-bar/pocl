@@ -34,9 +34,11 @@ pocl_topology_detect_device_info(cl_device_id device)
   int ret = hwloc_topology_init(&pocl_topology);
   if (ret == -1)
     POCL_ABORT("Cannot initialize the topology.\n");
+  /*
   ret = hwloc_topology_load(pocl_topology);
   if (ret == -1)
     POCL_ABORT("Cannot load the topology.\n");
+    */
 
   device->global_mem_size = hwloc_get_root_obj(pocl_topology)->memory.total_memory;
 

@@ -89,7 +89,7 @@ pocl_init_devices()
     }
   else
     {
-      device_list = "pthread";
+      device_list = "basic";
     }
   
   ptr = tofree = strdup(device_list);

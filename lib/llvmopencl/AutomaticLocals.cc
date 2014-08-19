@@ -23,6 +23,7 @@
 #include "config.h"
 #include "pocl.h"
 #include "Workgroup.h"
+#include "AutomaticLocals.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -59,20 +60,6 @@ using namespace std;
 using namespace llvm;
 using namespace pocl;
 
-namespace {
-  class AutomaticLocals : public ModulePass {
-  
-  public:
-    static char ID;
-    AutomaticLocals() : ModulePass(ID) {}
-    
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool runOnModule(Module &M);
-
-  private:
-    Function *ProcessAutomaticLocals(Function *F);
-  };
-}
 
 char AutomaticLocals::ID = 0;
 static RegisterPass<AutomaticLocals> X("automatic-locals",

@@ -25,7 +25,7 @@
 #include "pocl-pthread.h"
 #include "install-paths.h"
 #include <assert.h>
-#include <pthread.h>
+//#include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -119,30 +119,30 @@ void pocl_init_thread_argument_manager (void)
   if (!argument_pool_initialized)
     {
       argument_pool_initialized = 1;
-      POCL_INIT_LOCK (ta_pool_lock);
+      //POCL_INIT_LOCK (ta_pool_lock);
     }
 }
 
 thread_arguments* new_thread_arguments ()
 {
   thread_arguments *ta = NULL;
-  POCL_LOCK (ta_pool_lock);
+  //POCL_LOCK (ta_pool_lock);
   if (ta = thread_argument_pool)
     {
       LL_DELETE (thread_argument_pool, ta);
-      POCL_UNLOCK (ta_pool_lock);
+      //POCL_UNLOCK (ta_pool_lock);
       return ta;
     }
-  POCL_UNLOCK (ta_pool_lock);
+  //POCL_UNLOCK (ta_pool_lock);
     
   return calloc (1, sizeof (thread_arguments));
 }
 
 void free_thread_arguments (thread_arguments *ta)
 {
-  POCL_LOCK (ta_pool_lock);
+  //POCL_LOCK (ta_pool_lock);
   LL_PREPEND (thread_argument_pool, ta);
-  POCL_UNLOCK (ta_pool_lock);
+  //POCL_UNLOCK (ta_pool_lock);
 }
 
 void
@@ -150,7 +150,7 @@ pocl_pthread_init_device_ops(struct pocl_device_ops *ops)
 {
   pocl_basic_init_device_ops(ops);
 
-  ops->device_name = "pthread";
+    ops->device_name = "pthread";
 
   /* implementation */
   ops->init_device_infos = pocl_pthread_init_device_infos;
@@ -206,7 +206,7 @@ pocl_pthread_init (cl_device_id device, const char* parameters)
   if (mrm == NULL)
     {
       mrm = malloc (sizeof (mem_regions_management));
-      BA_INIT_LOCK (mrm->mem_regions_lock);
+      //BA_INIT_LOCK (mrm->mem_regions_lock);
       mrm->mem_regions = NULL;
     }
   d->mem_regions = mrm;
@@ -282,7 +282,8 @@ pocl_pthread_uninit (cl_device_id device)
 static int
 allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t size) 
 {
-  BA_LOCK(d->mem_regions->mem_regions_lock);
+  printf("pocl info: attempting to allocate buffer via custom_buf_alloc(%d,%d,%d)\n",memptr,alignment,size);
+  //BA_LOCK(d->mem_regions->mem_regions_lock);
   chunk_info_t *chunk = alloc_buffer (d->mem_regions->mem_regions, size);
   if (chunk == NULL)
     {
@@ -291,7 +292,8 @@ allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t
 
       if (new_mem_region == NULL) 
         {
-          BA_UNLOCK (d->mem_regions->mem_regions_lock);
+          //BA_UNLOCK (d->mem_regions->mem_regions_lock);
+          printf("ENONMEM malloc==null\n");
           return ENOMEM;
         }
 
@@ -311,7 +313,8 @@ allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t
              the smallest possible region for the buffer. */
           if ((posix_memalign (&space, alignment, size)) != 0) 
             {
-              BA_UNLOCK (d->mem_regions->mem_regions_lock);
+              //BA_UNLOCK (d->mem_regions->mem_regions_lock);
+              printf("ENOMEM posix_memalign(%d,%d,%d) fail\n",space,alignment,size);
               return ENOMEM;
             }
           region_size = size;
@@ -332,7 +335,7 @@ allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t
         assert (chunk != NULL);
       }
     }
-  BA_UNLOCK (d->mem_regions->mem_regions_lock);
+  //BA_UNLOCK (d->mem_regions->mem_regions_lock);
   
   *memptr = (void*) chunk->start_address;
   return 0;
@@ -343,6 +346,7 @@ allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t
 static int
 allocate_aligned_buffer (struct data* d, void **memptr, size_t alignment, size_t size) 
 {
+  printf("pocl info: attempting to allocate buffer via posix_memalign(%d,%d,%d)\n",memptr,alignment,size);
   return posix_memalign (memptr, alignment, size);
 }
 
@@ -379,6 +383,7 @@ pocl_pthread_malloc (void *device_data, cl_mem_flags flags, size_t size, void *h
 cl_int
 pocl_pthread_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
 {
+  printf("pocl info: allocating pthread mem obj\n");
   void *b = NULL;
   struct data* d = (struct data*)device->data;
   cl_int flags = mem_obj->flags;
@@ -423,8 +428,8 @@ pocl_pthread_free (void *device_data, cl_mem_flags flags, void *ptr)
   assert(region != NULL && "Unable to find the region for chunk.");
 
 #if FREE_EMPTY_REGIONS == 1
-  BA_LOCK(d->mem_regions->mem_regions_lock);
-  BA_LOCK(region->lock);
+  //BA_LOCK(d->mem_regions->mem_regions_lock);
+  //BA_LOCK(region->lock);
   if (region->last_chunk == region->chunks && 
       !region->chunks->is_allocated) 
     {
@@ -434,8 +439,8 @@ pocl_pthread_free (void *device_data, cl_mem_flags flags, void *ptr)
       free ((void*)region->last_chunk->start_address);
       free (region);    
     }  
-  BA_UNLOCK(region->lock);
-  BA_UNLOCK(d->mem_regions->mem_regions_lock);
+  //BA_UNLOCK(region->lock);
+  //BA_UNLOCK(d->mem_regions->mem_regions_lock);
 #endif
 }
 
@@ -604,15 +609,17 @@ pocl_pthread_run
     arguments->kernel_args = cmd->command.run.arguments;
 
     /* TODO: pool of worker threads to avoid syscalls here */
+    /*
     error = pthread_create (&threads[i],
                             NULL,
                             workgroup_thread,
                             arguments);
+                            */
     assert(!error);
   }
 
   for (i = 0; i < num_threads; ++i) {
-    pthread_join(threads[i], NULL);
+    //pthread_join(threads[i], NULL);
 #ifdef DEBUG_MT       
     printf("### thread %u finished\n", (unsigned)threads[i]);
 #endif

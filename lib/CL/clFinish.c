@@ -26,6 +26,7 @@
 #include "pocl_image_util.h"
 #include "utlist.h"
 #include "clEnqueueMapBuffer.h"
+#include <stdlib.h>
 
 static void exec_commands (_cl_command_node *node_list);
 
@@ -213,6 +214,7 @@ static void exec_commands (_cl_command_node *node_list)
                 buf,  node->command.run.kernel->function_name); */
               POname(clReleaseMemObject) (buf);
             }
+
           free (node->command.run.arg_buffers);
           free (node->command.run.tmp_dir);
           for (i = 0; i < node->command.run.kernel->num_args + 

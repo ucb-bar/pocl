@@ -280,6 +280,7 @@ pocl_basic_init_device_infos(struct _cl_device_id* dev)
   dev->extensions = "";
   dev->llvm_target_triplet = OCL_KERNEL_TARGET;
   dev->llvm_cpu = OCL_KERNEL_TARGET_CPU;
+  dev->llvm_target_arch = OCL_KERNEL_ARCH;
   dev->has_64bit_long = 1;
 }
 
@@ -364,8 +365,10 @@ pocl_basic_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
           b = mem_obj->mem_host_ptr;
         }
       else if (posix_memalign (&b, MAX_EXTENDED_ALIGNMENT, 
-                               mem_obj->size) != 0)
+                               mem_obj->size) != 0){
+        printf("align:%d, size:%d\n",MAX_EXTENDED_ALIGNMENT,mem_obj->size);
         return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+        }
 
       if (flags & CL_MEM_COPY_HOST_PTR)
         memcpy (b, mem_obj->mem_host_ptr, mem_obj->size);
@@ -384,8 +387,9 @@ pocl_basic_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
 void
 pocl_basic_free (void *data, cl_mem_flags flags, void *ptr)
 {
-  if (flags & CL_MEM_USE_HOST_PTR)
+  if (flags & CL_MEM_USE_HOST_PTR){
     return;
+  }
   
   free (ptr);
 }
@@ -424,6 +428,7 @@ pocl_basic_run
   cl_kernel kernel = cmd->command.run.kernel;
   struct pocl_context *pc = &cmd->command.run.pc;
 
+  printf("beginning to run basic kernel:%s\n",cmd->command.run.tmp_dir);
   assert (data != NULL);
   d = (struct data *) data;
 
@@ -517,13 +522,16 @@ pocl_basic_run
     }
   for (i = 0; i < kernel->num_args; ++i)
     {
-      if (kernel->arg_is_local[i])
+      if (kernel->arg_is_local[i]){
         pocl_basic_free(data, 0, *(void **)(arguments[i]));
+      }
     }
   for (i = kernel->num_args;
        i < kernel->num_args + kernel->num_locals;
-       ++i)
+       ++i){
     pocl_basic_free(data, 0, *(void **)(arguments[i]));
+    //free(arguments[i]);
+  }
 }
 
 void
@@ -719,17 +727,17 @@ void check_compiler_cache (_cl_command_node *cmd)
   lt_dlhandle dlhandle;
   compiler_cache_item *ci = NULL;
   
-  if (compiler_cache == NULL)
-    POCL_INIT_LOCK (compiler_cache_lock);
+  //if (compiler_cache == NULL)
+    //POCL_INIT_LOCK (compiler_cache_lock);
 
-  POCL_LOCK (compiler_cache_lock);
+  //POCL_LOCK (compiler_cache_lock);
   LL_FOREACH (compiler_cache, ci)
     {
       if (strcmp (ci->tmp_dir, cmd->command.run.tmp_dir) == 0 &&
           strcmp (ci->function_name, 
                   cmd->command.run.kernel->function_name) == 0)
         {
-          POCL_UNLOCK (compiler_cache_lock);
+          //POCL_UNLOCK (compiler_cache_lock);
           cmd->command.run.wg = ci->wg;
           return;
         }
@@ -754,7 +762,7 @@ void check_compiler_cache (_cl_command_node *cmd)
     (pocl_workgroup) lt_dlsym (dlhandle, workgroup_string);
 
   LL_APPEND (compiler_cache, ci);
-  POCL_UNLOCK (compiler_cache_lock);
+  //POCL_UNLOCK (compiler_cache_lock);
 
 }
 

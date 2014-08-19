@@ -29,7 +29,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <ltdl.h>
-#include <pthread.h>
+//#include <pthread.h>
 
 #define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #ifdef BUILD_ICD
@@ -64,6 +64,7 @@
 #else
 #define LINK_CMD CLANG
 #endif
+#define CROSS_LINK_CMD CROSS_CLANG
 
 /* Debugging macros. Also macros for marking unimplemented parts of specs or
    untested parts of the implementation. */
@@ -108,23 +109,18 @@ typedef pthread_mutex_t pocl_lock_t;
 
 #define POCL_RELEASE_OBJECT(__OBJ__, __NEW_REFCOUNT__)  \
   do {                                                  \
-    POCL_LOCK_OBJ (__OBJ__);                            \
     __NEW_REFCOUNT__ = --(__OBJ__)->pocl_refcount;      \
-    POCL_UNLOCK_OBJ (__OBJ__);                          \
   } while (0)                          
 
 #define POCL_RETAIN_OBJECT(__OBJ__)             \
   do {                                          \
-    POCL_LOCK_OBJ (__OBJ__);                    \
     (__OBJ__)->pocl_refcount++;                   \
-    POCL_UNLOCK_OBJ (__OBJ__);                  \
   } while (0)
 
 /* The reference counter is initialized to 1,
    when it goes to 0 object can be freed. */
 #define POCL_INIT_OBJECT_NO_ICD(__OBJ__)         \
   do {                                           \
-    POCL_INIT_LOCK ((__OBJ__)->pocl_lock);         \
     (__OBJ__)->pocl_refcount = 1;                  \
   } while (0)
 
@@ -344,6 +340,8 @@ struct _cl_device_id {
   void *data;
   const char* llvm_target_triplet; /* the llvm target triplet to use */
   const char* llvm_cpu; /* the llvm CPU variant to use */
+  const char* llvm_target_arch; /* the llvm arch to use */
+  //const char* llvm_target_features; /* the llvm target features to use */
   /* A running number (starting from zero) across all the device instances. Used for 
      indexing  arrays in data structures with device specific entries. */
   int dev_id;

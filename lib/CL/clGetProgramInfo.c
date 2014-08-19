@@ -93,14 +93,26 @@ POname(clGetProgramInfo)(cl_program program,
     }
   case CL_PROGRAM_NUM_DEVICES:
     {
+      printf("start of get cl_program_num_devices\n");
       size_t const value_size = sizeof(cl_uint);
       if (param_value)
       {
+        printf("param_value cond of get cl_program_num_devices\n");
         if (param_value_size < value_size) return CL_INVALID_VALUE;
+        printf("not invalid_value of get cl_program_num_devices\n");
+        printf("param_value=%x\n",param_value);
+        printf("program=%x\n",program);
+        printf("program->num_devices=%x\n",program->num_devices);
+        printf("(size_t *) param_value=%x\n",(size_t *) param_value);
+        //printf("*param_value=%x\n",*param_value);
+        printf("*(size_t *) param_value=%x\n",*(size_t *) param_value);
         *(size_t *) param_value = program->num_devices;
+        printf("set param_value of get cl_program_num_devices\n");
       }
+      printf("after param_value cond cl_program_num_devices\n");
       if (param_value_size_ret)
         *param_value_size_ret = value_size;
+      printf("after param_value_size_ret cond cl_program_num_devices\n");
       return CL_SUCCESS;
     }
 
