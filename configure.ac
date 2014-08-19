@@ -951,13 +951,13 @@ case $target_cpu in
     CROSS_LLC="llc"
     CROSS_CLANG="clang"
     TARGET_LLC_FLAGS="$HOST_LLC_FLAGS -march=riscv -mattr=+RV64,+a,+m,+f,+d"
-    TARGET_AS_FLAGS="$HOST_AS_FLAGS -target riscv -Wa,-march=RVIMAFD -Wa,-fpic"
+    TARGET_AS_FLAGS="$HOST_AS_FLAGS -target riscv-linux -Wa,-march=RVIMAFD -Wa,-fpic"
     TARGET_CLANG_FLAGS="${CLANG_TARGET_OPTION}$clang_cross_triple"
     TARGET_CLANG_MARCH_FLAG="mriscv"
-    TARGET_LD_FLAGS="$HOST_LD_FLAGS -target riscv -Wl,-melf64lriscv -Llib -rpath lib -lm -Wl,-fpic"
+    TARGET_LD_FLAGS="$HOST_LD_FLAGS -target riscv-linux -Wl,-melf64lriscv -Llib -rpath lib -lm -Wl,-fpic"
     CROSS_HWACHA_CLANG_FLAGS="$TARGET_CLANG_FLAGS -$TARGET_CLANG_MARCH_FLAG=$llc_hwacha_cpu"
     CROSS_HWACHA_LLC_FLAGS="$TARGET_LLC_FLAGS -mattr=+xhwacha --disable-lsr"
-    CROSS_HWACHA_AS_FLAGS="$HOST_AS_FLAGS -target riscv -Wa,-march=RVIMAFDXhwacha -Wa,-fpic"
+    CROSS_HWACHA_AS_FLAGS="$HOST_AS_FLAGS -target riscv-linux -Wa,-march=RVIMAFDXhwacha -Wa,-fpic"
     CROSS_HWACHA_LD_FLAGS="$TARGET_LD_FLAGS"
     ;;
   *)
