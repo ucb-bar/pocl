@@ -35,7 +35,7 @@ int pocl_llvm_build_program
 (cl_program program,
  unsigned device_i,
  const char* user_options,
- void **cache_lock, char *program_bc_path);
+ void **cache_lock, char *target_program_bc_path, char *host_program_bc_path);
 
 
 /* Retrieve metadata of the given kernel in the program to populate the
@@ -101,7 +101,8 @@ unsigned pocl_llvm_get_kernel_names( cl_program program, const char **knames, un
  */
 int pocl_llvm_codegen ( cl_kernel kernel,
                         cl_device_id device,
-                        const char *infile,
+                        const char *target_infile,
+                        const char *host_infile,
                         const char *outfile);
 
 /* Parse program file and populate program's llvm_irs */

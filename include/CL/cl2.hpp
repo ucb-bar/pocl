@@ -482,6 +482,17 @@
 #include <cstring>
 #include <functional>
 
+// TODO: remove call once better
+typedef int once_flag;
+
+template<typename Callable, typename... Args>
+void call_once(once_flag& flag, Callable&& f, Args&&... args ) {
+  if(!flag) {
+    auto bound_functor = std::bind(f, args...);
+    bound_functor();
+    flag = 1;
+  }
+}
 
 // Define a size_type to represent a correctly resolved size_t
 #if defined(CL_HPP_ENABLE_SIZE_T_COMPATIBILITY)
@@ -1886,7 +1897,7 @@ struct ImageFormat : public cl_image_format
 class Device : public detail::Wrapper<cl_device_id>
 {
 private:
-    static std::once_flag default_initialized_;
+    static once_flag default_initialized_;
     static Device default_;
     static cl_int default_error_;
 
@@ -1936,7 +1947,7 @@ public:
     static Device getDefault(
         cl_int *errResult = NULL)
     {
-        std::call_once(default_initialized_, makeDefault);
+        call_once(default_initialized_, makeDefault);
         detail::errHandler(default_error_);
         if (errResult != NULL) {
             *errResult = default_error_;
@@ -1953,7 +1964,7 @@ public:
     */
     static Device setDefault(const Device &default_device)
     {
-        std::call_once(default_initialized_, makeDefaultProvided, std::cref(default_device));
+        call_once(default_initialized_, makeDefaultProvided, std::cref(default_device));
         detail::errHandler(default_error_);
         return default_;
     }
@@ -2105,7 +2116,7 @@ public:
 #endif // defined(CL_HPP_USE_CL_DEVICE_FISSION)
 };
 
-CL_HPP_DEFINE_STATIC_MEMBER_ std::once_flag Device::default_initialized_;
+CL_HPP_DEFINE_STATIC_MEMBER_ once_flag Device::default_initialized_;
 CL_HPP_DEFINE_STATIC_MEMBER_ Device Device::default_;
 CL_HPP_DEFINE_STATIC_MEMBER_ cl_int Device::default_error_ = CL_SUCCESS;
 
@@ -2119,7 +2130,7 @@ CL_HPP_DEFINE_STATIC_MEMBER_ cl_int Device::default_error_ = CL_SUCCESS;
 class Platform : public detail::Wrapper<cl_platform_id>
 {
 private:
-    static std::once_flag default_initialized_;
+    static once_flag default_initialized_;
     static Platform default_;
     static cl_int default_error_;
 
@@ -2214,7 +2225,7 @@ public:
     static Platform getDefault(
         cl_int *errResult = NULL)
     {
-        std::call_once(default_initialized_, makeDefault);
+        call_once(default_initialized_, makeDefault);
         detail::errHandler(default_error_);
         if (errResult != NULL) {
             *errResult = default_error_;
@@ -2231,7 +2242,7 @@ public:
      */
     static Platform setDefault(const Platform &default_platform)
     {
-        std::call_once(default_initialized_, makeDefaultProvided, std::cref(default_platform));
+        call_once(default_initialized_, makeDefaultProvided, std::cref(default_platform));
         detail::errHandler(default_error_);
         return default_;
     }
@@ -2465,7 +2476,7 @@ public:
 #endif // CL_HPP_TARGET_OPENCL_VERSION >= 120
 }; // class Platform
 
-CL_HPP_DEFINE_STATIC_MEMBER_ std::once_flag Platform::default_initialized_;
+CL_HPP_DEFINE_STATIC_MEMBER_ once_flag Platform::default_initialized_;
 CL_HPP_DEFINE_STATIC_MEMBER_ Platform Platform::default_;
 CL_HPP_DEFINE_STATIC_MEMBER_ cl_int Platform::default_error_ = CL_SUCCESS;
 
@@ -2499,7 +2510,7 @@ class Context
     : public detail::Wrapper<cl_context>
 {
 private:
-    static std::once_flag default_initialized_;
+    static once_flag default_initialized_;
     static Context default_;
     static cl_int default_error_;
 
@@ -2744,7 +2755,7 @@ public:
      */
     static Context getDefault(cl_int * err = NULL) 
     {
-        std::call_once(default_initialized_, makeDefault);
+        call_once(default_initialized_, makeDefault);
         detail::errHandler(default_error_);
         if (err != NULL) {
             *err = default_error_;
@@ -2761,7 +2772,7 @@ public:
      */
     static Context setDefault(const Context &default_context)
     {
-        std::call_once(default_initialized_, makeDefaultProvided, std::cref(default_context));
+        call_once(default_initialized_, makeDefaultProvided, std::cref(default_context));
         detail::errHandler(default_error_);
         return default_;
     }
@@ -2890,7 +2901,7 @@ inline void Device::makeDefault()
 #endif
 }
 
-CL_HPP_DEFINE_STATIC_MEMBER_ std::once_flag Context::default_initialized_;
+CL_HPP_DEFINE_STATIC_MEMBER_ once_flag Context::default_initialized_;
 CL_HPP_DEFINE_STATIC_MEMBER_ Context Context::default_;
 CL_HPP_DEFINE_STATIC_MEMBER_ cl_int Context::default_error_ = CL_SUCCESS;
 
@@ -6442,7 +6453,7 @@ inline Kernel::Kernel(const Program& program, const char* name, cl_int* err)
 class CommandQueue : public detail::Wrapper<cl_command_queue>
 {
 private:
-    static std::once_flag default_initialized_;
+    static once_flag default_initialized_;
     static CommandQueue default_;
     static cl_int default_error_;
 
@@ -6638,7 +6649,7 @@ public:
 
     static CommandQueue getDefault(cl_int * err = NULL) 
     {
-        std::call_once(default_initialized_, makeDefault);
+        call_once(default_initialized_, makeDefault);
 #if CL_HPP_TARGET_OPENCL_VERSION >= 200
         detail::errHandler(default_error_, __CREATE_COMMAND_QUEUE_WITH_PROPERTIES_ERR);
 #else // CL_HPP_TARGET_OPENCL_VERSION >= 200
@@ -6659,7 +6670,7 @@ public:
      */
     static CommandQueue setDefault(const CommandQueue &default_queue)
     {
-        std::call_once(default_initialized_, makeDefaultProvided, std::cref(default_queue));
+        call_once(default_initialized_, makeDefaultProvided, std::cref(default_queue));
         detail::errHandler(default_error_);
         return default_;
     }
@@ -7662,7 +7673,7 @@ typedef CL_API_ENTRY cl_int (CL_API_CALL *PFN_clEnqueueReleaseD3D10ObjectsKHR)(
     }
 }; // CommandQueue
 
-CL_HPP_DEFINE_STATIC_MEMBER_ std::once_flag CommandQueue::default_initialized_;
+CL_HPP_DEFINE_STATIC_MEMBER_ once_flag CommandQueue::default_initialized_;
 CL_HPP_DEFINE_STATIC_MEMBER_ CommandQueue CommandQueue::default_;
 CL_HPP_DEFINE_STATIC_MEMBER_ cl_int CommandQueue::default_error_ = CL_SUCCESS;
 

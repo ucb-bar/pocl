@@ -30,11 +30,11 @@
 # should itself change.
 
 SUBDIRS = example1 example1-spir32 example1-spir64 example2 example2a trig \
-	scalarwave standalone opencl-book-samples VexCL ViennaCL Rodinia Parboil \
+	scalarwave opencl-book-samples VexCL ViennaCL Rodinia Parboil \
 	AMD AMDSDK2.9 EinsteinToolkit piglit Halide OpenCV CloverLeaf
 
 BASIC_EXAMPLES = example1 example1-spir32 example1-spir64 example2 example2a trig \
-	scalarwave standalone opencl-book-samples EinsteinToolkit
+	scalarwave opencl-book-samples EinsteinToolkit
 
 EXTRA_DIST = CMakeLists.txt
 

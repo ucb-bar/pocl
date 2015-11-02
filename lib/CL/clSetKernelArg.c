@@ -25,6 +25,7 @@
 #include "config.h"
 #include "pocl_cl.h"
 #include "pocl_util.h"
+#include "pocl_map.h"
 #include <assert.h>
 #include <string.h>
 #include <stdbool.h>
@@ -104,12 +105,53 @@ POname(clSetKernelArg)(cl_kernel kernel,
       p->value = NULL;
     }
 
-#if 0
   printf(
-      "### clSetKernelArg for %s arg %d (size %u) set to %x points to %x\n", 
-      kernel->name, arg_index, arg_size, p->value, *(int*)arg_value);
-#endif
+      "### clSetKernelArg for %s arg %d name %s type_name %s (size %u) set to %x arg_value %x points to %x\n", 
+      kernel->name, arg_index, pi->name, pi->type_name, arg_size, p->value, arg_value, *(int*)arg_value);
 
+  printf("mapping cl_mem[%lx]->arg[%s]\n",*(cl_mem*)arg_value, pi->name);
+  put_mem_arg_map(*(cl_mem*)arg_value, pi->name);
+  char input_file[POCL_FILENAME_LENGTH];
+  snprintf(input_file, POCL_FILENAME_LENGTH,"input_%s.h", pi->name);
+  char header[300];
+  if(pi->type == POCL_ARG_TYPE_POINTER) {
+    int pb = snprintf(header, 300, "char %s[%ld] = {\n",pi->name,(*(cl_mem*)arg_value)->size);
+    pocl_write_file(input_file, header, pb, 0, 0);
+    // Check if this buffer has already been filled
+    void* ptr = get_buffer_arg_map(*(cl_mem*)arg_value);
+    if(ptr != 0 && (*(cl_mem*)arg_value)->flags != CL_MEM_WRITE_ONLY) {
+      //printf("Writing %u bytes to %s\n",(*(cl_mem*)arg_value)->size,input_file);
+      int i;
+      for(i = 0; i < (*(cl_mem*)arg_value)->size; i++) {
+        char byte_text[6];
+        snprintf(byte_text,6,"%3d,\n",((uint8_t*)ptr)[i]);
+        pocl_write_file(input_file, byte_text, 5, 1, 1);
+      }
+    }
+  } else if(pi->type == POCL_ARG_TYPE_NONE) {
+    int pb;
+    switch(arg_size) {
+      case 1:
+        pb = snprintf(header, 300, "%s %s = (%s)0x%hhx;\n",pi->type_name,pi->name,pi->type_name,*(uint8_t*)arg_value);
+        break;
+      case 2:
+        pb = snprintf(header, 300, "%s %s = (%s)0x%hx;\n",pi->type_name,pi->name,pi->type_name,*(uint16_t*)arg_value);
+        break;
+      case 4:
+        pb = snprintf(header, 300, "%s %s = (%s)0x%x;\n",pi->type_name,pi->name,pi->type_name,*(uint32_t*)arg_value);
+        break;
+      case 8:
+        pb = snprintf(header, 300, "%s %s = (%s)0x%lx;\n",pi->type_name,pi->name,pi->type_name,*(uint64_t*)arg_value);
+        break;
+    }
+    pocl_write_file(input_file, header, pb, 0, 0);
+  }
+
+  if(pi->type == POCL_ARG_TYPE_POINTER) {
+    cl_mem_t* m = (cl_mem_t*)arg_value;
+    printf(
+      "### cl_mem hp:%lx &hp:%lx \n", m->mem_host_ptr, &(m->mem_host_ptr));
+  }
   p->size = arg_size;
   pi->is_set = 1;
 

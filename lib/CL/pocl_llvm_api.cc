@@ -123,7 +123,7 @@ POP_COMPILER_DIAGS
  */
 static LLVMContext *globalContext = NULL;
 LLVMContext *GlobalContext() {
-  if (globalContext == NULL) globalContext = new LLVMContext();
+  if (globalContext == NULL) globalContext = &getGlobalContext();
   return globalContext;
 }
 
@@ -225,7 +225,8 @@ int pocl_llvm_build_program(cl_program program,
                             unsigned device_i,
                             const char* user_options,
                             void** cache_lock,
-                            char* program_bc_path)
+                            char* target_program_bc_path,
+                            char* host_program_bc_path)
 
 {
   llvm::MutexGuard lockHolder(kernelCompilerLock);
@@ -234,20 +235,31 @@ int pocl_llvm_build_program(cl_program program,
   // Use CompilerInvocation::CreateFromArgs to initialize
   // CompilerInvocation. This way we can reuse the Clang's
   // command line parsing.
-  llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID = 
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> target_diagID = 
     new clang::DiagnosticIDs();
-  llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts = 
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> host_diagID = 
+    new clang::DiagnosticIDs();
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> target_diagOpts = 
     new clang::DiagnosticOptions();
-  clang::TextDiagnosticBuffer *diagsBuffer = 
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> host_diagOpts = 
+    new clang::DiagnosticOptions();
+  clang::TextDiagnosticBuffer *target_diagsBuffer = 
+    new clang::TextDiagnosticBuffer();
+  clang::TextDiagnosticBuffer *host_diagsBuffer = 
     new clang::TextDiagnosticBuffer();
 
-  clang::DiagnosticsEngine diags(diagID, &*diagOpts, diagsBuffer);
+  clang::DiagnosticsEngine target_diags(target_diagID, &*target_diagOpts, target_diagsBuffer);
+  clang::DiagnosticsEngine host_diags(host_diagID, &*host_diagOpts, host_diagsBuffer);
 
-  CompilerInstance CI;
-  CompilerInvocation &pocl_build = CI.getInvocation();
+  CompilerInstance target_CI;
+  CompilerInstance host_CI;
+  CompilerInvocation &target_pocl_build = target_CI.getInvocation();
+  CompilerInvocation &host_pocl_build = host_CI.getInvocation();
 
-  std::stringstream ss;
-  std::stringstream ss_build_log;
+  std::stringstream target_ss;
+  std::stringstream host_ss;
+  std::stringstream target_ss_build_log;
+  std::stringstream host_ss_build_log;
 
   // add device specific switches, if any
   // TODO this currently passes NULL as device tmpdir
@@ -258,7 +270,8 @@ int pocl_llvm_build_program(cl_program program,
         device->ops->init_build (device->data);
       if (device_switches != NULL)
         {
-          ss << device_switches << " ";
+          target_ss << device_switches << " ";
+          host_ss << device_switches << " ";
         }
       POCL_MEM_FREE(device_switches);
     }
@@ -271,44 +284,69 @@ int pocl_llvm_build_program(cl_program program,
   // the 'barrier' function to prevent them.
   // ss << "-O2 ";
 
-  ss << "-x cl ";
+  target_ss << "-x cl ";
+  host_ss << "-x cl ";
   // Remove the inline keywords to force the user functions
   // to be included in the program. Otherwise they will
   // be removed and not inlined due to -O0.
-  ss << "-Dinline= ";
+  target_ss << "-Dinline= ";
+  host_ss << "-Dinline= ";
   // The current directory is a standard search path.
-  ss << "-I. ";
+  target_ss << "-I. ";
+  host_ss << "-I. ";
 
    /* With fp-contract we get calls to fma with processors which do not
       have fma instructions. These ruin the performance. Better to have
       the mul+add separated in the IR. */
-  ss << "-fno-builtin -ffp-contract=off ";
+  target_ss << "-fno-builtin -ffp-contract=off ";
+  host_ss << "-fno-builtin -ffp-contract=off ";
   // This is required otherwise the initialization fails with
   // unknown triplet ''
-  ss << "-triple=" << device->llvm_target_triplet << " ";
-  if (device->llvm_cpu != NULL)
-    ss << "-target-cpu " << device->llvm_cpu << " ";
-  ss << user_options << " ";
-  std::istream_iterator<std::string> begin(ss);
+  target_ss << "-triple=" << device->llvm_target_triplet << " ";
+  host_ss << "-triple=" << device->llvm_host_triplet << " ";
+  if (device->llvm_target_cpu != NULL) 
+    target_ss << "-target-cpu " << device->llvm_target_cpu << " ";
+  if (device->llvm_host_cpu != NULL) 
+    host_ss << "-target-cpu " << device->llvm_host_cpu << " ";
+  
+  target_ss << user_options << " ";
+  host_ss << user_options << " ";
+  std::istream_iterator<std::string> target_begin(target_ss);
+  std::istream_iterator<std::string> host_begin(host_ss);
   std::istream_iterator<std::string> end;
-  std::istream_iterator<std::string> i = begin;
-  std::vector<const char*> itemcstrs;
-  std::vector<std::string> itemstrs;
-  while (i != end) 
+  std::istream_iterator<std::string> target_i = target_begin;
+  std::istream_iterator<std::string> host_i = host_begin;
+  std::vector<const char*> target_itemcstrs;
+  std::vector<const char*> host_itemcstrs;
+  std::vector<std::string> target_itemstrs;
+  std::vector<std::string> host_itemstrs;
+
+  while (target_i != end) 
     {
-      itemstrs.push_back(*i);
-      ++i;
+      target_itemstrs.push_back(*target_i);
+      ++target_i;
     }
-  for (unsigned idx=0; idx<itemstrs.size(); idx++)
+  for (unsigned idx=0; idx<target_itemstrs.size(); idx++)
     {
       // note: if itemstrs is modified after this, itemcstrs will be full
       // of invalid pointers! Could make copies, but would have to clean up then...
-      itemcstrs.push_back(itemstrs[idx].c_str());
+      target_itemcstrs.push_back(target_itemstrs[idx].c_str());
+    }
+  while (host_i != end) 
+    {
+      host_itemstrs.push_back(*host_i);
+      ++host_i;
+    }
+  for (unsigned idx=0; idx<host_itemstrs.size(); idx++)
+    {
+      // note: if itemstrs is modified after this, itemcstrs will be full
+      // of invalid pointers! Could make copies, but would have to clean up then...
+      host_itemcstrs.push_back(host_itemstrs[idx].c_str());
     }
 #ifdef DEBUG_POCL_LLVM_API
   // TODO: for some reason the user_options are replicated,
   // they appear twice in a row in the output
-  std::cerr << "### options: " << ss.str() 
+  std::cerr << "### target options: " << target_ss.str() 
             << "user_options: " << user_options << std::endl;
 #endif
 
@@ -316,40 +354,63 @@ int pocl_llvm_build_program(cl_program program,
     POCL_MEM_FREE(program->build_log[device_i]);
 
   if (!CompilerInvocation::CreateFromArgs
-      (pocl_build, itemcstrs.data(), itemcstrs.data() + itemcstrs.size(), 
-       diags))
+      (target_pocl_build, target_itemcstrs.data(), target_itemcstrs.data() + target_itemcstrs.size(), 
+       target_diags))
     {
       pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
-        program_bc_path, cache_lock);
-      get_build_log(program, device_i, ss_build_log, diagsBuffer, CI.getSourceManager());
+        target_program_bc_path, host_program_bc_path, cache_lock);
+      get_build_log(program, device_i, target_ss_build_log, target_diagsBuffer, target_CI.getSourceManager());
+      return CL_INVALID_BUILD_OPTIONS;
+    }
+  if (!CompilerInvocation::CreateFromArgs
+      (host_pocl_build, host_itemcstrs.data(), host_itemcstrs.data() + host_itemcstrs.size(), 
+       host_diags))
+    {
+      pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
+        target_program_bc_path, host_program_bc_path, cache_lock);
+      get_build_log(program, device_i, host_ss_build_log, host_diagsBuffer, host_CI.getSourceManager());
       return CL_INVALID_BUILD_OPTIONS;
     }
   
-  LangOptions *la = pocl_build.getLangOpts();
-  pocl_build.setLangDefaults
-    (*la, clang::IK_OpenCL, clang::LangStandard::lang_opencl12);
+  LangOptions *target_la = target_pocl_build.getLangOpts();
+  LangOptions *host_la = host_pocl_build.getLangOpts();
+  target_pocl_build.setLangDefaults
+    (*target_la, clang::IK_OpenCL, clang::LangStandard::lang_opencl12);
+  host_pocl_build.setLangDefaults
+    (*host_la, clang::IK_OpenCL, clang::LangStandard::lang_opencl12);
   
   // LLVM 3.3 and older do not set that char is signed which is
   // defined by the OpenCL C specs (but not by C specs).
-  la->CharIsSigned = true;
+  target_la->CharIsSigned = true;
+  host_la->CharIsSigned = true;
 
   // the per-file types don't seem to override this 
-  la->OpenCLVersion = 120;
-  la->FakeAddressSpaceMap = true;
-  la->Blocks = true; //-fblocks
-  la->MathErrno = false; // -fno-math-errno
-  la->NoBuiltin = true;  // -fno-builtin
+  target_la->OpenCLVersion = 120;
+  host_la->OpenCLVersion = 120;
+  target_la->FakeAddressSpaceMap = true;
+  host_la->FakeAddressSpaceMap = true;
+  target_la->Blocks = true; //-fblocks
+  host_la->Blocks = true; //-fblocks
+  target_la->MathErrno = false; // -fno-math-errno
+  host_la->MathErrno = false; // -fno-math-errno
+  target_la->NoBuiltin = true;  // -fno-builtin
+  host_la->NoBuiltin = true;  // -fno-builtin
 #ifndef LLVM_3_2
-  la->AsmBlocks = true;  // -fasm (?)
+  target_la->AsmBlocks = true;  // -fasm (?)
+  host_la->AsmBlocks = true;  // -fasm (?)
 #endif
 
-  PreprocessorOptions &po = pocl_build.getPreprocessorOpts();
+  PreprocessorOptions &target_po = target_pocl_build.getPreprocessorOpts();
+  PreprocessorOptions &host_po = host_pocl_build.getPreprocessorOpts();
   /* configure.ac sets a a few host specific flags for pthreads and
      basic devices. */
-  if (device->has_64bit_long == 0)
-    po.addMacroDef("_CL_DISABLE_LONG");
+  if (device->has_64bit_long == 0) {
+    target_po.addMacroDef("_CL_DISABLE_LONG");
+    host_po.addMacroDef("_CL_DISABLE_LONG");
+  }
 
-  po.addMacroDef("__OPENCL_VERSION__=120"); // -D__OPENCL_VERSION_=120
+  target_po.addMacroDef("__OPENCL_VERSION__=120"); // -D__OPENCL_VERSION_=120
+  host_po.addMacroDef("__OPENCL_VERSION__=120"); // -D__OPENCL_VERSION_=120
 
   std::string kernelh;
   if (pocl_get_bool_option("POCL_BUILDING", 0))
@@ -362,121 +423,170 @@ int pocl_llvm_build_program(cl_program program,
       kernelh = PKGDATADIR;
       kernelh += "/include/_kernel.h";
     }
-  po.Includes.push_back(kernelh);
+  target_po.Includes.push_back(kernelh);
+  host_po.Includes.push_back(kernelh);
 
   // TODO: user_options (clBuildProgram options) are not passed
 
-  clang::TargetOptions &ta = pocl_build.getTargetOpts();
-  ta.Triple = device->llvm_target_triplet;
-  if (device->llvm_cpu != NULL)
-    ta.CPU = device->llvm_cpu;
+  clang::TargetOptions &target_ta = target_pocl_build.getTargetOpts();
+  clang::TargetOptions &host_ta = host_pocl_build.getTargetOpts();
+  target_ta.Triple = device->llvm_target_triplet;
+  host_ta.Triple = device->llvm_host_triplet;
+  if (device->llvm_target_cpu != NULL)
+    target_ta.CPU = device->llvm_target_cpu;
+  if (device->llvm_host_cpu != NULL)
+    host_ta.CPU = device->llvm_host_cpu;
 
-  // printf("### Triple: %s, CPU: %s\n", ta.Triple.c_str(), ta.CPU.c_str());
+   printf("### TARGET Triple: %s, CPU: %s\n", target_ta.Triple.c_str(), target_ta.CPU.c_str());
+   printf("### HOST Triple: %s, CPU: %s\n", host_ta.Triple.c_str(), host_ta.CPU.c_str());
 
 #ifdef LLVM_3_2
-  CI.createDiagnostics(0, NULL, diagsBuffer, false);
+  target_CI.createDiagnostics(0, NULL, target_diagsBuffer, false);
+  host_CI.createDiagnostics(0, NULL, host_diagsBuffer, false);
 #else
-  CI.createDiagnostics(diagsBuffer, false);
+  target_CI.createDiagnostics(target_diagsBuffer, false);
+  host_CI.createDiagnostics(host_diagsBuffer, false);
 #endif 
 
-  FrontendOptions &fe = pocl_build.getFrontendOpts();
+  FrontendOptions &target_fe = target_pocl_build.getFrontendOpts();
+  FrontendOptions &host_fe = host_pocl_build.getFrontendOpts();
   // The CreateFromArgs created an stdin input which we should remove first.
-  fe.Inputs.clear(); 
-  if (load_source(fe, program)!=0)
+  target_fe.Inputs.clear(); 
+  host_fe.Inputs.clear(); 
+  if (load_source(target_fe, program)!=0)
+    return CL_OUT_OF_HOST_MEMORY;
+  if (load_source(host_fe, program)!=0)
     return CL_OUT_OF_HOST_MEMORY;
 
-  CodeGenOptions &cg = pocl_build.getCodeGenOpts();
-  cg.EmitOpenCLArgMetadata = true;
-  cg.StackRealignment = true;
+  CodeGenOptions &target_cg = target_pocl_build.getCodeGenOpts();
+  CodeGenOptions &host_cg = host_pocl_build.getCodeGenOpts();
+  target_cg.EmitOpenCLArgMetadata = true;
+  host_cg.EmitOpenCLArgMetadata = true;
+  target_cg.StackRealignment = true;
+  host_cg.StackRealignment = true;
   // Let the vectorizer or another optimization pass unroll the loops,
   // in case it sees beneficial.
-  cg.UnrollLoops = false;
+  target_cg.UnrollLoops = false;
+  host_cg.UnrollLoops = false;
   // This workarounds a Frontend codegen issues with an illegal address
   // space cast which is later flattened (and thus implicitly fixed) in
   // the TargetAddressSpaces. See:  https://github.com/pocl/pocl/issues/195
-  cg.VerifyModule = false;
+  target_cg.VerifyModule = false;
+  host_cg.VerifyModule = false;
 
-  PreprocessorOutputOptions &poo = pocl_build.getPreprocessorOutputOpts();
+  PreprocessorOutputOptions &target_poo = target_pocl_build.getPreprocessorOutputOpts();
+  PreprocessorOutputOptions &host_poo = host_pocl_build.getPreprocessorOutputOpts();
   //PreprocessorOutputOptions prep = CI.getPreprocessorOutputOpts();
-  poo.ShowCPP = 1;
-  poo.ShowComments = 0;
-  poo.ShowLineMarkers = 0;
+  target_poo.ShowCPP = 1;
+  host_poo.ShowCPP = 1;
+  target_poo.ShowComments = 0;
+  host_poo.ShowComments = 0;
+  target_poo.ShowLineMarkers = 0;
+  host_poo.ShowLineMarkers = 0;
   //poo.UseLineDirectives = 0;   // probably LLVM 3.7 thing
-  poo.ShowMacroComments = 0;
-  poo.ShowMacros = 1;
-  poo.RewriteIncludes = 0;
+  target_poo.ShowMacroComments = 0;
+  host_poo.ShowMacroComments = 0;
+  target_poo.ShowMacros = 1;
+  host_poo.ShowMacros = 1;
+  target_poo.RewriteIncludes = 0;
+  host_poo.RewriteIncludes = 0;
 
-  std::string saved_output(fe.OutputFile);
+  std::string target_saved_output(target_fe.OutputFile);
+  std::string host_saved_output(host_fe.OutputFile);
 
-  char tempfile[POCL_FILENAME_LENGTH];
-  pocl_cache_mk_temp_name(tempfile);
+  char target_tempfile[POCL_FILENAME_LENGTH];
+  char host_tempfile[POCL_FILENAME_LENGTH];
+  pocl_cache_mk_temp_name(target_tempfile);
+  pocl_cache_mk_temp_name(host_tempfile);
 
-  fe.OutputFile = tempfile;
+  target_fe.OutputFile = target_tempfile;
+  host_fe.OutputFile = host_tempfile;
 
   bool success = true;
   clang::FrontendAction *action2 = NULL;
   action2 = new clang::PrintPreprocessedAction();
-  success = CI.ExecuteAction(*action2);
+  success = target_CI.ExecuteAction(*action2);
   if (!success)
     {
       pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
-        program_bc_path, cache_lock);
-      get_build_log(program, device_i, ss_build_log, diagsBuffer, CI.getSourceManager());
+        target_program_bc_path, host_program_bc_path, cache_lock);
+      get_build_log(program, device_i, target_ss_build_log, target_diagsBuffer, target_CI.getSourceManager());
+      return CL_BUILD_PROGRAM_FAILURE;
+    }
+  success = host_CI.ExecuteAction(*action2);
+  if (!success)
+    {
+      pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
+        target_program_bc_path, host_program_bc_path, cache_lock);
+      get_build_log(program, device_i, host_ss_build_log, host_diagsBuffer, host_CI.getSourceManager());
       return CL_BUILD_PROGRAM_FAILURE;
     }
 
   char *preprocessed_out;
   uint64_t size;
-  pocl_read_file(tempfile, &preprocessed_out, &size);
+  pocl_read_file(host_tempfile, &preprocessed_out, &size);
   if (!preprocessed_out)
     {
       pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
-        program_bc_path, cache_lock);
-      get_build_log(program, device_i, ss_build_log, diagsBuffer, CI.getSourceManager());
+        target_program_bc_path, host_program_bc_path, cache_lock);
+      get_build_log(program, device_i, host_ss_build_log, host_diagsBuffer, host_CI.getSourceManager());
       return CL_BUILD_PROGRAM_FAILURE;
     }
 
   pocl_cache_create_program_cachedir(program, device_i, preprocessed_out,
-                                     size, program_bc_path, cache_lock);
+                                     size, target_program_bc_path, host_program_bc_path, cache_lock);
 
   POCL_MEM_FREE(preprocessed_out);
-  pocl_remove(tempfile);
+  pocl_remove(target_tempfile);
+  pocl_remove(host_tempfile);
 
-  if (pocl_exists(program_bc_path)) {
-    unlink_source(fe);
+  if (pocl_exists(host_program_bc_path)) {
+    unlink_source(target_fe);
+    unlink_source(host_fe);
     return CL_SUCCESS;
   }
 
-  fe.OutputFile = saved_output;
+  target_fe.OutputFile = target_saved_output;
+  host_fe.OutputFile = host_saved_output;
 
   // TODO: use pch: it is possible to disable the strict checking for
   // the compilation flags used to compile it and the current translation
   // unit via the preprocessor options directly.
 
-  clang::CodeGenAction *action = NULL;
-  action = new clang::EmitLLVMOnlyAction(GlobalContext());
-  success = CI.ExecuteAction(*action);
+  clang::CodeGenAction *target_action = NULL;
+  clang::CodeGenAction *host_action = NULL;
+  target_action = new clang::EmitLLVMOnlyAction(GlobalContext());
+  host_action = new clang::EmitLLVMOnlyAction(GlobalContext());
+  success = target_CI.ExecuteAction(*target_action);
+  success = host_CI.ExecuteAction(*host_action);
 
-  get_build_log(program, device_i, ss_build_log, diagsBuffer, CI.getSourceManager());
+  get_build_log(program, device_i, target_ss_build_log, target_diagsBuffer, target_CI.getSourceManager());
+  get_build_log(program, device_i, host_ss_build_log, host_diagsBuffer, host_CI.getSourceManager());
 
   // FIXME: memleak, see FIXME below
   if (!success) return CL_BUILD_PROGRAM_FAILURE;
 
-  llvm::Module **mod = (llvm::Module **)&program->llvm_irs[device_i];
-  if (*mod != NULL)
-    delete (llvm::Module*)*mod;
+  //TODO COLIN: we only save the host in progrm->* we should have a host and target device, but thats way more work
+  llvm::Module **target_mod = (llvm::Module **)&program->llvm_irs[device_i];
+  llvm::Module **host_mod = (llvm::Module **)&program->llvm_irs[device_i];
+  if (*host_mod != NULL)
+    delete (llvm::Module*)*host_mod;
 
 #if LLVM_VERSION_MAJOR==3 && LLVM_VERSION_MINOR<6
-  *mod = action->takeModule();
+  *target_mod = target_action->takeModule();
+  *host_mod = host_action->takeModule();
 #else
-  *mod = action->takeModule().release();
+  *target_mod = target_action->takeModule().release();
+  *host_mod = host_action->takeModule().release();
 #endif
 
-  if (*mod == NULL)
+  if (*host_mod == NULL)
     return CL_BUILD_PROGRAM_FAILURE;
 
   /* Always retain program.bc. Its required in clBuildProgram */
-  pocl_write_module(*mod, program_bc_path, 0);
+  printf("writing program.bc to target:%s and host:%s\n",target_program_bc_path, host_program_bc_path);
+  pocl_write_module(*target_mod, target_program_bc_path, 0);
+  pocl_write_module(*host_mod, host_program_bc_path, 0);
 
   /* To avoid writing & reading the same back,
    * save program->binaries[i]
@@ -484,7 +594,7 @@ int pocl_llvm_build_program(cl_program program,
 
   std::string content;
   llvm::raw_string_ostream sos(content);
-  WriteBitcodeToFile(*mod, sos);
+  WriteBitcodeToFile(*host_mod, sos);
   sos.str(); // flush
 
   if (program->binaries[device_i])
@@ -495,7 +605,8 @@ int pocl_llvm_build_program(cl_program program,
   program->binaries[device_i] = (unsigned char *) malloc(n);
   std::memcpy(program->binaries[device_i], content.c_str(), n);
 
-  unlink_source(fe);
+  unlink_source(target_fe);
+  unlink_source(host_fe);
 
   // FIXME: cannot delete action as it contains something the llvm::Module
   // refers to. We should create it globally, at compiler initialization time.
@@ -654,7 +765,7 @@ int pocl_llvm_get_kernel_metadata(cl_program program,
                                   const char* kernel_name,
                                   int * errcode)
 {
-
+  printf("start get kernel metadata\n");fflush(stdout);
   int i;
   llvm::Module *input = NULL;
 
@@ -893,13 +1004,13 @@ static llvm::TargetOptions GetTargetOptions() {
 #endif
   return Options;
 }
-// Returns the TargetMachine instance or zero if no triple is provided.
-static TargetMachine* GetTargetMachine(cl_device_id device,
+// Returns the Host TargetMachine instance or zero if no triple is provided.
+static TargetMachine* GetHostMachine(cl_device_id device,
  const std::vector<std::string>& MAttrs=std::vector<std::string>()) {
 
   std::string Error;
-  Triple TheTriple(device->llvm_target_triplet);
-  std::string MCPU =  device->llvm_cpu ? device->llvm_cpu : "";
+  Triple TheTriple(device->llvm_host_triplet);
+  std::string MCPU =  device->llvm_host_cpu ? device->llvm_host_cpu : "";
   const Target *TheTarget = 
     TargetRegistry::lookupTarget("", TheTriple, Error);
   
@@ -920,6 +1031,40 @@ static TargetMachine* GetTargetMachine(cl_device_id device,
     FeaturesStr = Features.getString();
   }
 
+  printf("target->name:%s MCPU:%s features:%s\n",TheTarget->getName(), MCPU.c_str(), FeaturesStr.c_str());fflush(stdout);fflush(stderr);
+  return TheTarget->createTargetMachine(TheTriple.getTriple(),
+                                        MCPU, FeaturesStr, GetTargetOptions(),
+                                        Reloc::PIC_, CodeModel::Default,
+                                        CodeGenOpt::Aggressive);
+}
+// Returns the TargetMachine instance or zero if no triple is provided.
+static TargetMachine* GetTargetMachine(cl_device_id device,
+ const std::vector<std::string>& MAttrs=std::vector<std::string>()) {
+
+  std::string Error;
+  Triple TheTriple(device->llvm_target_triplet);
+  std::string MCPU =  device->llvm_target_cpu ? device->llvm_target_cpu : "";
+  const Target *TheTarget = 
+    TargetRegistry::lookupTarget("", TheTriple, Error);
+  
+  // In LLVM 3.4 and earlier, the target registry falls back to 
+  // the cpp backend in case a proper match was not found. In 
+  // that case simply do not use target info in the compilation 
+  // because it can be an off-tree target not registered at
+  // this point (read: TCE).
+  if (!TheTarget || TheTarget->getName() == std::string("cpp")) {
+    return 0;
+  }
+  // Package up features to be passed to target/subtarget
+  std::string FeaturesStr;
+  if (MAttrs.size()) {
+    SubtargetFeatures Features;
+    for (unsigned i = 0; i != MAttrs.size(); ++i)
+      Features.AddFeature(MAttrs[i]);
+    FeaturesStr = Features.getString();
+  }
+
+  printf("target->name:%s MCPU:%s features:%s\n",TheTarget->getName(), MCPU.c_str(), FeaturesStr.c_str());fflush(stdout);fflush(stderr);
   return TheTarget->createTargetMachine(TheTriple.getTriple(),
                                         MCPU, FeaturesStr, GetTargetOptions(),
                                         Reloc::PIC_, CodeModel::Default,
@@ -942,34 +1087,39 @@ static void InitializeLLVM() {
 }
 
 /**
- * Prepare the kernel compiler passes.
+ * Prepare the target kernel compiler passes.
  *
  * The passes are created only once per program run per device.
  * The returned pass manager should not be modified, only the Module
  * should be optimized using it.
  */
-static PassManager& kernel_compiler_passes
+static PassManager& target_kernel_compiler_passes
 (cl_device_id device, const std::string& module_data_layout)
 {
-  static std::map<cl_device_id, PassManager*> kernel_compiler_passes;
+  static std::map<cl_device_id, PassManager*> target_kernel_compiler_passes;
 
-  if (kernel_compiler_passes.find(device) != 
-      kernel_compiler_passes.end())
+  if (target_kernel_compiler_passes.find(device) != 
+      target_kernel_compiler_passes.end())
     {
-      return *kernel_compiler_passes[device];
+      return *target_kernel_compiler_passes[device];
     }
 
+  printf("llvm_target_triplet:%s\n",device->llvm_target_triplet);fflush(stdout);fflush(stderr);
   Triple triple(device->llvm_target_triplet);
 
   bool SPMDDevice = device->spmd;
 
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
 
-  const bool first_initialization_call = kernel_compiler_passes.size() == 0;
+  const bool first_initialization_call = target_kernel_compiler_passes.size() == 0;
 
   if (first_initialization_call) {
     // TODO: do this globally, and just once per program
     initializeCore(Registry);
+    initializeCodeGen(Registry);
+    initializeLoopStrengthReducePass(Registry);
+    initializeLowerIntrinsicsPass(Registry);
+    initializeUnreachableBlockElimPass(Registry);
     initializeScalarOpts(Registry);
     initializeVectorization(Registry);
     initializeIPO(Registry);
@@ -998,6 +1148,7 @@ static PassManager& kernel_compiler_passes
 #endif
 
   PassManager *Passes = new PassManager();
+  printf("created passmanager\n");fflush(stdout);fflush(stderr);
 
 #if defined LLVM_3_2
 #elif defined LLVM_OLDER_THAN_3_7
@@ -1023,6 +1174,7 @@ static PassManager& kernel_compiler_passes
     Passes->add(new DataLayoutPass());
 #endif
   }
+  printf("added datalayout\n");fflush(stdout);fflush(stderr);
 
   /* Disables automated generation of libcalls from code patterns. 
      TCE doesn't have a runtime linker which could link the libs later on.
@@ -1057,6 +1209,7 @@ static PassManager& kernel_compiler_passes
      restore code (PHIs need to be at the beginning of the BB and so one cannot
      context restore them with non-PHI code if the value is needed in another PHI). */
 
+  printf("building passes list\n");fflush(stdout);fflush(stderr);
   std::vector<std::string> passes;
   passes.push_back("workitem-handler-chooser");
   passes.push_back("mem2reg");
@@ -1106,7 +1259,7 @@ static PassManager& kernel_compiler_passes
           passes.push_back("scalarizer");
         }
 
-      if (kernel_compiler_passes.size() == 0) 
+      if (target_kernel_compiler_passes.size() == 0) 
         {
           // Set the options only once. TODO: fix it so that each
           // device can reset their own options. Now one cannot compile
@@ -1173,6 +1326,7 @@ static PassManager& kernel_compiler_passes
       if (passes[i] == "STANDARD_OPTS")
         {
           PassManagerBuilder Builder;
+          printf("created passmanagerbuilder\n");fflush(stdout);fflush(stderr);
           Builder.OptLevel = 3;
           Builder.SizeLevel = 0;
 
@@ -1206,6 +1360,7 @@ static PassManager& kernel_compiler_passes
       if(PIs)
         {
           //std::cout << "-"<<passes[i] << " ";
+          printf("creating pass:%s\n",passes[i].c_str());fflush(stdout);fflush(stderr);
           Pass *thispass = PIs->createPass();
           Passes->add(thispass);
         }
@@ -1215,7 +1370,304 @@ static PassManager& kernel_compiler_passes
           POCL_ABORT("FAIL");
         }
     }
-  kernel_compiler_passes[device] = Passes;
+  target_kernel_compiler_passes[device] = Passes;
+  return *Passes;
+}
+
+/**
+ * Prepare the host kernel compiler passes.
+ *
+ * The passes are created only once per program run per device.
+ * The returned pass manager should not be modified, only the Module
+ * should be optimized using it.
+ */
+static PassManager& host_kernel_compiler_passes
+(cl_device_id device, const std::string& module_data_layout)
+{
+  static std::map<cl_device_id, PassManager*> host_kernel_compiler_passes;
+
+  if (host_kernel_compiler_passes.find(device) != 
+      host_kernel_compiler_passes.end())
+    {
+      return *host_kernel_compiler_passes[device];
+    }
+
+  printf("llvm_host_triplet:%s\n",device->llvm_host_triplet);fflush(stdout);fflush(stderr);
+  Triple triple(device->llvm_host_triplet);
+
+  bool SPMDDevice = device->spmd;
+
+  PassRegistry &Registry = *PassRegistry::getPassRegistry();
+
+  const bool first_initialization_call = host_kernel_compiler_passes.size() == 0;
+
+  if (first_initialization_call) {
+    // TODO: do this globally, and just once per program
+    initializeCore(Registry);
+    initializeCodeGen(Registry);
+    initializeLoopStrengthReducePass(Registry);
+    initializeLowerIntrinsicsPass(Registry);
+    initializeUnreachableBlockElimPass(Registry);
+    initializeScalarOpts(Registry);
+    initializeVectorization(Registry);
+    initializeIPO(Registry);
+    initializeAnalysis(Registry);
+    initializeIPA(Registry);
+    initializeTransformUtils(Registry);
+    initializeInstCombine(Registry);
+    initializeInstrumentation(Registry);
+    initializeTarget(Registry);
+  }
+
+#if !(defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+  // Scalarizer is in LLVM upstream since 3.4.
+  const bool SCALARIZE = pocl_is_option_set("POCL_SCALARIZE_KERNELS");
+#else
+  const bool SCALARIZE = false;
+#endif
+
+#ifndef LLVM_3_2
+# ifdef LLVM_OLDER_THAN_3_7
+  StringMap<llvm::cl::Option*> opts;
+  llvm::cl::getRegisteredOptions(opts);
+# else
+  StringMap<llvm::cl::Option *>& opts = llvm::cl::getRegisteredOptions();
+# endif
+#endif
+
+  PassManager *Passes = new PassManager();
+  printf("created passmanager\n");fflush(stdout);fflush(stderr);
+
+#if defined LLVM_3_2
+#elif defined LLVM_OLDER_THAN_3_7
+  // Need to setup the target info for target specific passes. */
+  TargetMachine *Machine = GetHostMachine(device);
+
+  // Add internal analysis passes from the target machine.
+  if (Machine != NULL)
+    Machine->addAnalysisPasses(*Passes);
+#else 
+  TargetMachine *Machine = GetHostMachine(device);
+  if (Machine != NULL)
+    Passes->add(createTargetTransformInfoWrapperPass(Machine->getTargetIRAnalysis()));
+#endif
+
+
+  if (module_data_layout != "") {
+#if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+    Passes->add(new DataLayout(module_data_layout));
+#elif (defined LLVM_3_5)
+    Passes->add(new DataLayoutPass(DataLayout(module_data_layout)));
+#elif (defined LLVM_OLDER_THAN_3_7)
+    Passes->add(new DataLayoutPass());
+#endif
+  }
+  printf("added datalayout\n");fflush(stdout);fflush(stderr);
+
+  /* Disables automated generation of libcalls from code patterns. 
+     TCE doesn't have a runtime linker which could link the libs later on.
+     Also the libcalls might be harmful for WG autovectorization where we 
+     want to try to vectorize the code it converts to e.g. a memset or 
+     a memcpy */
+#ifdef LLVM_OLDER_THAN_3_7
+  TargetLibraryInfo *TLI = new TargetLibraryInfo(triple);
+  TLI->disableAllFunctions();
+  Passes->add(TLI);
+#else
+  TargetLibraryInfoImpl TLII(triple);
+  TLII.disableAllFunctions();
+  Passes->add(new TargetLibraryInfoWrapperPass(TLII));
+#endif
+
+  /* The kernel compiler passes to run, in order.
+
+     Notes about the kernel compiler phase ordering:
+     -mem2reg first because we get unoptimized output from Clang where all
+     variables are allocas. Avoid context saving the allocas and make the
+     more readable by calling -mem2reg at the beginning.
+
+     -implicit-cond-barriers after -implicit-loop-barriers because the latter can inject
+     barriers to loops inside conditional regions after which the peeling should be 
+     avoided by injecting the implicit conditional barriers
+
+     -loop-barriers, -barriertails, and -barriers should be ran after the implicit barrier 
+     injection passes so they "normalize" the implicit barriers also
+
+     -phistoallocas before -workitemloops as otherwise it cannot inject context
+     restore code (PHIs need to be at the beginning of the BB and so one cannot
+     context restore them with non-PHI code if the value is needed in another PHI). */
+
+  printf("building passes list\n");fflush(stdout);fflush(stderr);
+  std::vector<std::string> passes;
+  passes.push_back("workitem-handler-chooser");
+  passes.push_back("mem2reg");
+  passes.push_back("domtree");
+  passes.push_back("break-constgeps");
+  if(device->autolocals_to_args)
+	  passes.push_back("automatic-locals");
+  passes.push_back("flatten");
+  passes.push_back("always-inline");
+  passes.push_back("print-module");
+  passes.push_back("globaldce");
+  passes.push_back("print-module");
+  if (!SPMDDevice) {
+      passes.push_back("simplifycfg");
+      passes.push_back("loop-simplify");
+      passes.push_back("uniformity");
+      passes.push_back("phistoallocas");
+      passes.push_back("isolate-regions");
+      passes.push_back("implicit-loop-barriers");
+      passes.push_back("implicit-cond-barriers");
+      passes.push_back("loop-barriers");
+      passes.push_back("barriertails");
+      passes.push_back("barriers");
+      passes.push_back("isolate-regions");
+      passes.push_back("wi-aa");
+      passes.push_back("workitemrepl");
+      //passes.push_back("print-module");
+      passes.push_back("workitemloops");
+      passes.push_back("workgroup");
+  }
+  passes.push_back("globaldce");
+  passes.push_back("allocastoentry");
+  passes.push_back("target-address-spaces");
+  // Later passes might get confused (and expose possible bugs in them) due to
+  // UNREACHABLE blocks left by repl. So let's clean up the CFG before running the
+  // standard LLVM optimizations.
+  passes.push_back("simplifycfg");
+  passes.push_back("print-module");
+
+  const std::string wg_method = 
+    pocl_get_string_option("POCL_WORK_GROUP_METHOD", "loopvec");
+
+#ifndef LLVM_3_2
+  if (wg_method == "loopvec")
+    {
+
+      if (SCALARIZE)
+        {
+          printf("SCALARIZE\n");
+          passes.push_back("scalarizer");
+        }
+
+      if (host_kernel_compiler_passes.size() == 0) 
+        {
+          // Set the options only once. TODO: fix it so that each
+          // device can reset their own options. Now one cannot compile
+          // with different options to different devices at one run.
+
+          // LLVM inner loop vectorizer does not check whether the loop inside 
+          // another loop, in which case even a small trip count loops might be 
+          // worthwhile to vectorize.
+          llvm::cl::Option *O = opts["vectorizer-min-trip-count"];
+          assert(O && "could not find LLVM option 'vectorizer-min-trip-count'");
+          O->addOccurrence(1, StringRef("vectorizer-min-trip-count"), StringRef("2"), false); 
+
+          if (SCALARIZE) 
+            {
+              O = opts["scalarize-load-store"];
+              assert(O && "could not find LLVM option 'scalarize-load-store'");
+              O->addOccurrence(1, StringRef("scalarize-load-store"), StringRef(""), false); 
+            }
+
+#ifdef DEBUG_POCL_LLVM_API        
+          printf ("### autovectorizer enabled\n");
+
+          O = opts["debug-only"];
+          assert(O && "could not find LLVM option 'debug'");
+          O->addOccurrence(1, StringRef("debug-only"), StringRef("loop-vectorize"), false); 
+#endif
+
+#if !(defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+          if (pocl_get_bool_option("POCL_VECTORIZER_REMARKS", 0) == 1) {
+            // Enable diagnostics from the loop vectorizer.
+            O = opts["pass-remarks-missed"];
+            assert(O && "could not find LLVM option 'pass-remarks-missed'");
+            O->addOccurrence(1, StringRef("pass-remarks-missed"), StringRef("loop-vectorize"), 
+                             false); 
+
+            O = opts["pass-remarks-analysis"];
+            assert(O && "could not find LLVM option 'pass-remarks-analysis'");
+            O->addOccurrence(1, StringRef("pass-remarks-analysis"), StringRef("loop-vectorize"), 
+                             false); 
+
+            O = opts["pass-remarks"];
+            assert(O && "could not find LLVM option 'pass-remarks'");
+            O->addOccurrence(1, StringRef("pass-remarks"), StringRef("loop-vectorize"), 
+                             false); 
+          }
+#endif
+
+          O = opts["unroll-threshold"];
+          assert(O && "could not find LLVM option 'unroll-threshold'");
+          O->addOccurrence(1, StringRef("unroll-threshold"), StringRef("1"), false); 
+        }
+    } 
+#endif
+
+/*
+  passes.push_back("instcombine");
+  passes.push_back("STANDARD_OPTS");
+  passes.push_back("instcombine");
+*/
+
+  // Now actually add the listed passes to the PassManager.
+  for(unsigned i = 0; i < passes.size(); ++i)
+    {
+    
+      // This is (more or less) -O3
+      if (passes[i] == "STANDARD_OPTS")
+        {
+          PassManagerBuilder Builder;
+          printf("created passmanagerbuilder\n");fflush(stdout);fflush(stderr);
+          Builder.OptLevel = 3;
+          Builder.SizeLevel = 0;
+
+#if !(defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+          // These need to be setup in addition to invoking the passes
+          // to get the vectorizers initialized properly.
+          if (wg_method == "loopvec") {
+            Builder.LoopVectorize = true;
+            Builder.SLPVectorize = true;
+#ifdef LLVM_OLDER_THAN_3_7
+            Builder.BBVectorize = true;
+#else
+            // In LLVM 3.7 the BB vectorizer crashes with some of the
+            // the shuffle tests. Perhaps the pass is obsoleted due to
+            // SLPVectorize and not maintained?            
+            Builder.BBVectorize = false;
+#endif
+          }
+#endif
+
+#if defined(LLVM_3_2) || defined(LLVM_3_3)
+          // SimplifyLibCalls has been removed in LLVM 3.4.
+          Builder.DisableSimplifyLibCalls = true;
+#endif
+          Builder.populateModulePassManager(*Passes);
+     
+          continue;
+        }
+
+      const PassInfo *PIs = Registry.getPassInfo(StringRef(passes[i]));
+      if(PIs)
+        {
+          //std::cout << "-"<<passes[i] << " ";
+          printf("creating pass:%s\n",passes[i].c_str());fflush(stdout);fflush(stderr);
+          Pass *thispass = PIs->createPass();
+          Passes->add(thispass);
+        }
+      else
+        {
+          std::cerr << "Failed to create kernel compiler pass " << passes[i] << std::endl;
+          POCL_ABORT("FAIL");
+        }
+    }
+  llvm::cl::Option *O = opts["print-all-options"];
+  O->addOccurrence(1, StringRef("print-all-options"), StringRef(""), false); 
+  //O = opts["debug"];
+  //O->addOccurrence(1, StringRef("debug"), StringRef(""), false); 
+  host_kernel_compiler_passes[device] = Passes;
   return *Passes;
 }
 
@@ -1241,6 +1693,7 @@ kernel_library
 
   Triple triple(device->llvm_target_triplet);
 
+  printf("libs find\n");fflush(stdout);
   if (libs.find(device) != libs.end())
     {
       return libs[device];
@@ -1283,6 +1736,7 @@ kernel_library
     }
   else
     {
+  printf("kernelib name\n");fflush(stdout);
       kernellib = PKGDATADIR;
       kernellib += "/kernel-";
       kernellib += device->llvm_target_triplet;
@@ -1292,6 +1746,7 @@ kernel_library
   POCL_MSG_PRINT_INFO("using %s as the built-in lib.\n", kernellib.c_str());
 
   SMDiagnostic Err;
+  printf("parse ir file kernelib:%s\n",kernellib.c_str());fflush(stdout);
   llvm::Module *lib = ParseIRFile(kernellib.c_str(), Err, *GlobalContext());
   assert (lib != NULL);
   libs[device] = lib;
@@ -1306,16 +1761,19 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
                                           size_t local_x, size_t local_y, size_t local_z)
 {
   cl_program program = kernel->program;
+  printf("device_to_index\n");fflush(stdout);
   int device_i = pocl_cl_device_to_index(program, device);
   assert(device_i >= 0);
 
   char kernel_so_path[POCL_FILENAME_LENGTH];
+  printf("cache work group function so path\n");fflush(stdout);
   pocl_cache_work_group_function_so_path(kernel_so_path, program, device_i, kernel, local_x, local_y, local_z);
 
   if (pocl_exists(kernel_so_path))
     return CL_SUCCESS;
 
   llvm::MutexGuard lockHolder(kernelCompilerLock);
+  printf("init llvm\n");fflush(stdout);
   InitializeLLVM();
 
 #ifdef DEBUG_POCL_LLVM_API        
@@ -1324,7 +1782,8 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
          kernel->name, local_x, local_y, local_z, kernel_so_path);
 #endif
 
-  Triple triple(device->llvm_target_triplet);
+  Triple target_triple(device->llvm_target_triplet);
+  Triple host_triple(device->llvm_host_triplet);
 
   SMDiagnostic Err;
   std::string errmsg;
@@ -1337,24 +1796,33 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
 #ifdef DEBUG_POCL_LLVM_API        
       printf("### cloning the preloaded LLVM IR\n");
 #endif
+  printf("clone module\n");fflush(stdout);
       input = 
         llvm::CloneModule
         ((llvm::Module*)kernel->program->llvm_irs[device_i]);
+      input->dump();
     }
   else
     {
 #ifdef DEBUG_POCL_LLVM_API        
       printf("### loading the kernel bitcode from disk\n");
 #endif
-      char program_bc_path[POCL_FILENAME_LENGTH];
-      pocl_cache_program_bc_path(program_bc_path, program, device_i);
-      input = ParseIRFile(program_bc_path, Err, *GlobalContext());
+      char target_program_bc_path[POCL_FILENAME_LENGTH];
+      char host_program_bc_path[POCL_FILENAME_LENGTH];
+  printf("cache bc path\n");fflush(stdout);
+//TODO COLIN: fix this section of code to have host and target bc
+      pocl_cache_program_bc_path(target_program_bc_path, program, device_i, "/host");
+      pocl_cache_program_bc_path(host_program_bc_path, program, device_i, "/host");
+  printf("parse host ir file:%s,target:%s\n",host_program_bc_path, target_program_bc_path);fflush(stdout);
+      input = ParseIRFile(host_program_bc_path, Err, *GlobalContext());
     }
 
   // Later this should be replaced with indexed linking of source code
   // and/or bitcode for each kernel.
+  printf("kernel_library\n");fflush(stdout);
   llvm::Module *libmodule = kernel_library(device);
   assert (libmodule != NULL);
+  printf("link\n");fflush(stdout);
   link(input, libmodule);
 
   /* Now finally run the set of passes assembled above */
@@ -1364,18 +1832,25 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
   pocl::WGLocalSizeZ = local_z;
   KernelName = kernel->name;
 
+  printf("kernel compiler passes\n");fflush(stdout);fflush(stderr);
 #if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
-  kernel_compiler_passes(device, input->getDataLayout()).run(*input);
+  host_kernel_compiler_passes(device, input->getDataLayout()).run(*input);
 #elif (defined LLVM_OLDER_THAN_3_7)
-  kernel_compiler_passes(
+  host_kernel_compiler_passes(
       device,
       input->getDataLayout()->getStringRepresentation()).run(*input);
 #else
-  kernel_compiler_passes(
+  host_kernel_compiler_passes(
       device,
       input->getDataLayout().getStringRepresentation())
       .run(*input);
+  /*target_kernel_compiler_passes(
+      device,
+      input->getDataLayout().getStringRepresentation())
+      .run(*input);*/
 #endif
+  printf("cache write kernel parallel bc\n");fflush(stdout);fflush(stderr);
+  input->dump();
   // TODO: don't write this once LLC is called via API, not system()
   pocl_cache_write_kernel_parallel_bc(input, program, device_i, kernel,
                                   local_x, local_y, local_z);
@@ -1391,7 +1866,7 @@ pocl_update_program_llvm_irs(cl_program program,
   SMDiagnostic Err;
 
   char program_bc_path[POCL_FILENAME_LENGTH];
-  pocl_cache_program_bc_path(program_bc_path, program, device_i);
+  pocl_cache_program_bc_path(program_bc_path, program, device_i, "/host");
 
   if (!pocl_exists(program_bc_path))
     return -1;
@@ -1431,7 +1906,7 @@ void pocl_llvm_update_binaries (cl_program program) {
 
       cache_lock = pocl_cache_acquire_writer_lock_i(program, i);
 
-      pocl_cache_program_bc_path(program_bc_path, program, i);
+      pocl_cache_program_bc_path(program_bc_path, program, i, "/host");
       pocl_write_module((llvm::Module*)program->llvm_irs[i], program_bc_path, 1);
 
       std::string content;
@@ -1511,25 +1986,38 @@ pocl_llvm_get_kernel_names( cl_program program, const char **knames, unsigned ma
 int
 pocl_llvm_codegen(cl_kernel kernel,
                   cl_device_id device,
-                  const char *infilename,
+                  const char *target_infilename,
+                  const char *host_infilename,
                   const char *outfilename)
 {
     SMDiagnostic Err;
 
+    printf("pocl_llvm_codegen target:%s,host:%s\n",target_infilename,host_infilename);
+
     if (pocl_exists(outfilename))
       return 0;
 
-    llvm::Triple triple(device->llvm_target_triplet);
+    llvm::Triple target_triple(device->llvm_target_triplet);
+    llvm::Triple host_triple(device->llvm_host_triplet);
     llvm::TargetMachine *target = GetTargetMachine(device);
-    llvm::Module *input = ParseIRFile(infilename, Err, *GlobalContext());
+    llvm::TargetMachine *host = GetHostMachine(device);
 
-    PassManager PM;
-#ifdef LLVM_OLDER_THAN_3_7
+    llvm::Module *target_input = ParseIRFile(target_infilename, Err, *GlobalContext());
+    llvm::Module *host_input = ParseIRFile(host_infilename, Err, *GlobalContext());
+
+    printf("host input module\n");fflush(stdout);fflush(stderr);
+    host_input->dump();
+
+    PassManager target_PM;
+    PassManager host_PM;
+#ifdef LLVM_OLDER_THAN_3_7 //not used for riscv
     llvm::TargetLibraryInfo *TLI = new TargetLibraryInfo(triple);
     PM.add(TLI);
 #else
-    llvm::TargetLibraryInfoWrapperPass *TLIPass = new TargetLibraryInfoWrapperPass(triple);
-    PM.add(TLIPass);
+    llvm::TargetLibraryInfoWrapperPass *target_TLIPass = new TargetLibraryInfoWrapperPass(target_triple);
+    llvm::TargetLibraryInfoWrapperPass *host_TLIPass = new TargetLibraryInfoWrapperPass(host_triple);
+    target_PM.add(target_TLIPass);
+    host_PM.add(host_TLIPass);
 #endif
     if (target != NULL) {
 #if defined LLVM_3_2
@@ -1555,22 +2043,50 @@ pocl_llvm_codegen(cl_kernel kernel,
     std::string data;
     llvm::raw_string_ostream sos(data);
 #else
-    SmallVector<char, 4096> data;
-    llvm::raw_svector_ostream sos(data);
+    //llvm::SmallString<0> target_data;
+    //llvm::raw_svector_ostream target_sos(target_data);
+    std::error_code EC;
+    char target_outfile[POCL_FILENAME_LENGTH];
+    snprintf(target_outfile,POCL_FILENAME_LENGTH,"%s_target.S",outfilename);
+    //llvm::raw_fd_ostream target_sos(target_outfile, EC, sys::fs::F_None);
+    sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
+    OpenFlags |= sys::fs::F_Text;
+    auto FDOut = llvm::make_unique<tool_output_file>(target_outfile, EC,
+                                                   OpenFlags);
+    llvm::raw_pwrite_stream  *target_sos = &FDOut->os();
+    llvm::SmallString<0> host_data;
+    llvm::raw_svector_ostream host_sos(host_data);
 #endif
     llvm::MCContext *mcc;
 #ifdef LLVM_OLDER_THAN_3_7
     if (target && target->addPassesToEmitMC(PM, mcc, sos))
       return 1;
 #else
+/*
     if (target && target->addPassesToEmitFile(
-        PM, sos, TargetMachine::CGFT_ObjectFile))
+        target_PM, *target_sos, TargetMachine::CGFT_AssemblyFile))
+      return 1;
+*/
+    if (host && host->addPassesToEmitFile(
+        host_PM, host_sos, TargetMachine::CGFT_ObjectFile))
       return 1;
 #endif
 
-    PM.run(*input);
-    std::string o = sos.str(); // flush
-    return pocl_write_file(outfilename, o.c_str(), o.size(), 0, 0);
+    host_PM.run(*host_input);
+    std::string host_o = host_sos.str(); // flush
 
+    StringMap<llvm::cl::Option *>& opts = llvm::cl::getRegisteredOptions();
+    llvm::cl::Option *O = opts["print-all-options"];
+    O->addOccurrence(1, StringRef("print-all-options"), StringRef(""), false); 
+    O = opts["debug"];
+    O->addOccurrence(1, StringRef("debug"), StringRef(""), false); 
+    //target_PM.run(*target_input);
+    //FDOut->keep();
+    //target_sos.flush();
+    //std::string target_o = target_sos.str(); // flush
+    //printf("target asm:%s \n",target_o.c_str());fflush(stdout);fflush(stderr);
+
+    printf("host obj:%s \n to file:%s\n",host_o.c_str(),outfilename);fflush(stdout);fflush(stderr);
+    return pocl_write_file(outfilename, host_o.c_str(), host_o.size(), 0, 0);
 }
 /* vim: set ts=4 expandtab: */

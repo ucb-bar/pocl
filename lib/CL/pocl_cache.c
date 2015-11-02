@@ -82,9 +82,13 @@ static void program_device_dir(char*        path,
 // required in llvm API
 void pocl_cache_program_bc_path(char*        program_bc_path,
                                 cl_program   program,
-                                unsigned     device_i) {
+                                unsigned     device_i,
+                                char*        append) {
+    printf("program_bc_path:%s\n",program_bc_path);fflush(stdout);
+    char str_append[POCL_FILENAME_LENGTH];
+    snprintf(str_append, POCL_FILENAME_LENGTH, "%s%s", append, POCL_PROGRAM_BC_FILENAME);
     program_device_dir(program_bc_path, program,
-                       device_i, POCL_PROGRAM_BC_FILENAME);
+                       device_i, str_append);
 }
 
 // required in llvm API
@@ -178,6 +182,7 @@ int pocl_cache_device_cachedir_exists(cl_program   program,
     char device_cachedir_path[POCL_FILENAME_LENGTH];
     program_device_dir(device_cachedir_path, program, device_i, "");
 
+    printf("device_cachedir:%s\n",device_cachedir_path);fflush(stdout);
     return pocl_exists(device_cachedir_path);
 }
 
@@ -283,13 +288,23 @@ int pocl_cache_write_kernel_parallel_bc(void*        bc,
     assert(bc);
 
     char kernel_parallel_path[POCL_FILENAME_LENGTH];
+    char target_kernel_parallel_path[POCL_FILENAME_LENGTH];
     make_kernel_cachedir_path(kernel_parallel_path, program, device_i,
+                              kernel, program->devices[device_i]->spmd,
+                              local_x, local_y, local_z);
+    make_kernel_cachedir_path(target_kernel_parallel_path, program, device_i,
                               kernel, program->devices[device_i]->spmd,
                               local_x, local_y, local_z);
 
     assert( strlen(kernel_parallel_path) <
             (POCL_FILENAME_LENGTH - strlen(POCL_PARALLEL_BC_FILENAME)));
+    strcat(kernel_parallel_path, "/host_");
     strcat(kernel_parallel_path, POCL_PARALLEL_BC_FILENAME);
+    strcat(target_kernel_parallel_path, "/target_");
+    strcat(target_kernel_parallel_path, POCL_PARALLEL_BC_FILENAME);
+    printf("write target module:%s\n",target_kernel_parallel_path);fflush(stdout);
+    pocl_write_module(bc, target_kernel_parallel_path, 0); //COLIN FIXME
+    printf("write host module:%s\n",kernel_parallel_path);fflush(stdout);
     return pocl_write_module(bc, kernel_parallel_path, 0);
 }
 
@@ -483,7 +498,8 @@ pocl_cache_create_program_cachedir(cl_program program,
                                    unsigned device_i,
                                    const char* preprocessed_source,
                                    size_t source_len,
-                                   char* program_bc_path,
+                                   char* target_program_bc_path,
+                                   char* host_program_bc_path,
                                    void** cache_lock)
 {
     const char *hash_source = NULL;
@@ -517,12 +533,17 @@ pocl_cache_create_program_cachedir(cl_program program,
         pocl_free_llvm_irs(program, device_i);
     }
 
-    program_device_dir(program_bc_path, program, device_i, "");
+    program_device_dir(target_program_bc_path, program, device_i, "/target");
+    program_device_dir(host_program_bc_path, program, device_i, "/host");
+    printf("cache_create host:%s,target:%s\n",host_program_bc_path,target_program_bc_path);
 
-    if (pocl_mkdir_p(program_bc_path))
+    if (pocl_mkdir_p(target_program_bc_path))
+        return 1;
+    if (pocl_mkdir_p(host_program_bc_path))
         return 1;
 
-    pocl_cache_program_bc_path(program_bc_path, program, device_i);
+    pocl_cache_program_bc_path(target_program_bc_path, program, device_i, "/target");
+    pocl_cache_program_bc_path(host_program_bc_path, program, device_i, "/host");
 
     *cache_lock = pocl_cache_acquire_writer_lock_i(program, device_i);
 

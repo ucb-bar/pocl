@@ -171,7 +171,7 @@ endif
 # see: http://stackoverflow.com/questions/17055279/autotools-for-pthreads-not-setting-correct-linker-flags
 noinst_LTLIBRARIES = libpoclllvm.la
 
-libpoclllvm_la_SOURCES = pocl_llvm_api.cc
+libpoclllvm_la_SOURCES = pocl_llvm_api.cc pocl_map.cc
 libpoclllvm_la_CPPFLAGS = ${libpocl_la_CPPFLAGS} -I$(top_srcdir)/lib/llvmopencl/
 libpoclllvm_la_LDFLAGS = @LLVM_LDFLAGS@
 libpocl_la_LDFLAGS += @LLVM_LDFLAGS@

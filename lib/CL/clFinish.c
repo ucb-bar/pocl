@@ -120,11 +120,16 @@ static void exec_commands (_cl_command_node *node_list)
              node->command.read.device_ptr,
              node->command.read.offset,
              node->command.read.cb);
+          //printf("READ BUFFER hp:%lx dp:%lx data:%d\n",
+//node->command.read.host_ptr, node->command.read.device_ptr, ((long*)node->command.read.host_ptr)[0]);
           POCL_UPDATE_EVENT_COMPLETE(event);
           POname(clReleaseMemObject) (node->command.read.buffer);
           break;
         case CL_COMMAND_WRITE_BUFFER:
           POCL_UPDATE_EVENT_RUNNING(event);
+          //printf("WRITE BUFFER hp:%lx &hp:%lx dp:%lx &dp:%lx data:%d\n",
+//node->command.write.host_ptr, &(node->command.write.host_ptr),
+//node->command.write.device_ptr, &(node->command.write.device_ptr), ((long*)node->command.write.host_ptr)[0]);
           node->device->ops->write
             (node->device->data,
              node->command.write.host_ptr,
@@ -206,6 +211,7 @@ static void exec_commands (_cl_command_node *node_list)
           POCL_UPDATE_EVENT_COMPLETE(event);
           break;
         case CL_COMMAND_NDRANGE_KERNEL:
+          printf("start command ndrange kernel\n");fflush(stdout);fflush(stderr);
           assert (*event == node->event);
           POCL_UPDATE_EVENT_RUNNING(event);
           node->device->ops->run(node->command.run.data, node);

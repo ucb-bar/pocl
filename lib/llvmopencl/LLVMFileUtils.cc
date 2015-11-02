@@ -232,10 +232,15 @@ int pocl_write_file(const char *path, const char* content,
     else
         OPEN_CREATE;
 
+    if(ec) printf("open error:%s\n",ec.message().c_str());
+    fflush(stdout);fflush(stderr);
     RETURN_IF_ERRNO;
 
-    if (write(fd, content, (ssize_t)count) < (ssize_t)count)
+    if (write(fd, content, (ssize_t)count) < (ssize_t)count){
+      perror("write error");
+    fflush(stdout);fflush(stderr);
         return errno ? -errno : -1;
+    }
 
     return (close(fd) ? (-errno) : 0);
 }

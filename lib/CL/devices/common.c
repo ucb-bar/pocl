@@ -60,7 +60,8 @@ const char*
 llvm_codegen (const char* tmpdir, cl_kernel kernel, cl_device_id device) {
 
   char command[COMMAND_LENGTH];
-  char bytecode[POCL_FILENAME_LENGTH];
+  char target_bytecode[POCL_FILENAME_LENGTH];
+  char host_bytecode[POCL_FILENAME_LENGTH];
   char objfile[POCL_FILENAME_LENGTH];
 
   char* module = malloc(strlen(tmpdir) + strlen(kernel->name) +
@@ -80,11 +81,17 @@ llvm_codegen (const char* tmpdir, cl_kernel kernel, cl_device_id device) {
   if (pocl_exists(module))
     return module;
 
-      error = snprintf (bytecode, POCL_FILENAME_LENGTH,
-                        "%s%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
+      error = snprintf (target_bytecode, POCL_FILENAME_LENGTH,
+                        "%s/target_%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
+      assert (error >= 0);
+
+      error = snprintf (host_bytecode, POCL_FILENAME_LENGTH,
+                        "%s/host_%s", tmpdir, POCL_PARALLEL_BC_FILENAME);
       assert (error >= 0);
       
-      error = pocl_llvm_codegen( kernel, device, bytecode, objfile);
+//TODO COLIN: make sure that both of these bytecodes are made (should only be the datalayout stuff thats different)
+//objfile is only for host, target generates .S
+      error = pocl_llvm_codegen( kernel, device, target_bytecode, host_bytecode, objfile);
       assert (error == 0);
 
       // clang is used as the linker driver in LINK_CMD
@@ -98,14 +105,17 @@ llvm_codegen (const char* tmpdir, cl_kernel kernel, cl_device_id device) {
       assert (error >= 0);
 
       POCL_MSG_PRINT_INFO ("executing [%s]\n", command);
+      printf("executing [%s]\n", command);
       error = system (command);
       assert (error == 0);
 
       /* Save space in kernel cache */
       if (!pocl_get_bool_option("POCL_LEAVE_KERNEL_COMPILER_TEMP_FILES", 0))
         {
+          printf("deleteing temp files\n");
           pocl_remove(objfile);
-          pocl_remove(bytecode);
+          pocl_remove(target_bytecode);
+          pocl_remove(host_bytecode);
         }
 
   return module;

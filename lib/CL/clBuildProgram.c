@@ -92,7 +92,8 @@ POname(clBuildProgram)(cl_program program,
                        void *user_data) 
 CL_API_SUFFIX__VERSION_1_0
 {
-  char program_bc_path[POCL_FILENAME_LENGTH];
+  char target_program_bc_path[POCL_FILENAME_LENGTH];
+  char host_program_bc_path[POCL_FILENAME_LENGTH];
   int errcode;
   size_t i;
   int error;
@@ -225,7 +226,7 @@ CL_API_SUFFIX__VERSION_1_0
       if (program->source)
         {
           error = pocl_llvm_build_program(program, device_i, user_options,
-                                          &cache_lock, program_bc_path);
+                                          &cache_lock, target_program_bc_path, host_program_bc_path);
           if (error != 0)
             {
               errcode = CL_BUILD_PROGRAM_FAILURE;
@@ -235,10 +236,12 @@ CL_API_SUFFIX__VERSION_1_0
         }
       /* clCreateProgramWithBinaries */
       else if (program->binaries[device_i]) {
+            printf("buildingProgram with Binaries\n");
             pocl_cache_create_program_cachedir(program, device_i, NULL, 0,
-                                               program_bc_path, &cache_lock);
+                                               target_program_bc_path, host_program_bc_path, &cache_lock);
             assert(cache_lock);
-            errcode = pocl_write_file(program_bc_path, (char*)program->binaries[device_i],
+            printf("buildingProgram write host_bc:%s,target_bc:%s\n",host_program_bc_path,target_program_bc_path);
+            errcode = pocl_write_file(host_program_bc_path, (char*)program->binaries[device_i],
                           (uint64_t)program->binary_sizes[device_i], 0, 0);
             POCL_GOTO_ERROR_ON(errcode, CL_BUILD_PROGRAM_FAILURE,
                                "Failed to write binaries to program.bc\n");
@@ -252,8 +255,8 @@ CL_API_SUFFIX__VERSION_1_0
       /* Read binaries from program.bc to memory */
       if (program->binaries[device_i] == NULL)
         {
-          errcode = pocl_read_file(program_bc_path, &binary, &fsize);
-          POCL_GOTO_ERROR_ON(errcode, CL_BUILD_ERROR, "Failed to read binaries from program.bc to memory: %s\n", program_bc_path);
+          errcode = pocl_read_file(host_program_bc_path, &binary, &fsize);
+          POCL_GOTO_ERROR_ON(errcode, CL_BUILD_ERROR, "Failed to read binaries from program.bc to memory: %s\n", host_program_bc_path);
 
           program->binary_sizes[device_i] = (size_t)fsize;
           program->binaries[device_i] = (unsigned char *)binary;

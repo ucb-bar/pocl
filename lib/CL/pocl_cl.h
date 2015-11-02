@@ -33,7 +33,7 @@
 #else
 #  include "vccompat.hpp"
 #endif
-#include <pthread.h>
+//#include <pthread.h>
 #ifdef HAVE_CLOCK_GETTIME
 #include <time.h>
 #endif
@@ -61,16 +61,18 @@
 #define LINK_CMD CLANG
 #endif
 
-typedef pthread_mutex_t pocl_lock_t;
-#define POCL_LOCK_INITIALIZER PTHREAD_MUTEX_INITIALIZER
+typedef int pocl_lock_t;
+//typedef pthread_mutex_t pocl_lock_t;
+//#define POCL_LOCK_INITIALIZER PTHREAD_MUTEX_INITIALIZER
+#define POCL_LOCK_INITIALIZER 0
 
 /* Generic functionality for handling different types of 
    OpenCL (host) objects. */
 
-#define POCL_LOCK(__LOCK__) pthread_mutex_lock (&(__LOCK__))
-#define POCL_UNLOCK(__LOCK__) pthread_mutex_unlock (&(__LOCK__))
-#define POCL_INIT_LOCK(__LOCK__) pthread_mutex_init (&(__LOCK__), NULL)
-#define POCL_DESTROY_LOCK(__LOCK__) pthread_mutex_destroy (&(__LOCK__))
+#define POCL_LOCK(__LOCK__) //pthread_mutex_lock (&(__LOCK__))
+#define POCL_UNLOCK(__LOCK__) //pthread_mutex_unlock (&(__LOCK__))
+#define POCL_INIT_LOCK(__LOCK__) //pthread_mutex_init (&(__LOCK__), NULL)
+#define POCL_DESTROY_LOCK(__LOCK__) //pthread_mutex_destroy (&(__LOCK__))
 
 #define POCL_LOCK_OBJ(__OBJ__) POCL_LOCK((__OBJ__)->pocl_lock)
 #define POCL_UNLOCK_OBJ(__OBJ__) POCL_UNLOCK((__OBJ__)->pocl_lock)
@@ -367,7 +369,9 @@ struct _cl_device_id {
  
   void *data;
   const char* llvm_target_triplet; /* the llvm target triplet to use */
-  const char* llvm_cpu; /* the llvm CPU variant to use */
+  const char* llvm_target_cpu; /* the llvm CPU variant to use */
+  const char* llvm_host_triplet; /* the llvm target triplet to use */
+  const char* llvm_host_cpu; /* the llvm CPU variant to use */
   /* A running number (starting from zero) across all the device instances. Used for 
      indexing  arrays in data structures with device specific entries. */
   int dev_id;

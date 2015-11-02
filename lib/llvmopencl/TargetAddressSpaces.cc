@@ -199,6 +199,10 @@ TargetAddressSpaces::runOnModule(llvm::Module &M) {
     addrSpaceMap[POCL_ADDRESS_SPACE_GLOBAL] = 1;
     addrSpaceMap[POCL_ADDRESS_SPACE_LOCAL] = 3;
     addrSpaceMap[POCL_ADDRESS_SPACE_CONSTANT] = 2;
+  } else if (arch.startswith("riscv")) {
+    addrSpaceMap[POCL_ADDRESS_SPACE_GLOBAL] =
+        addrSpaceMap[POCL_ADDRESS_SPACE_LOCAL] =
+        addrSpaceMap[POCL_ADDRESS_SPACE_CONSTANT] = 0;
   } else {
     /* Assume the fake address space map works directly in case not
        overridden here.  */

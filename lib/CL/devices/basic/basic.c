@@ -329,7 +329,9 @@ pocl_basic_init_device_infos(struct _cl_device_id* dev)
       "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics";
 
   dev->llvm_target_triplet = OCL_KERNEL_TARGET;
-  dev->llvm_cpu = OCL_KERNEL_TARGET_CPU;
+  dev->llvm_target_cpu = OCL_KERNEL_TARGET_CPU;
+  dev->llvm_host_triplet = OCL_KERNEL_HOST;
+  dev->llvm_host_cpu = OCL_KERNEL_HOST_CPU;
   dev->has_64bit_long = 1;
   dev->autolocals_to_args = 1;
 }
@@ -447,8 +449,10 @@ pocl_basic_init (cl_device_id device, const char* parameters)
      using multiple OpenCL devices. */
   device->max_compute_units = 1;
 
-  if(!strcmp(device->llvm_cpu, "(unknown)"))
-    device->llvm_cpu = NULL;
+  if(!strcmp(device->llvm_host_cpu, "(unknown)"))
+    device->llvm_host_cpu = NULL;
+  if(!strcmp(device->llvm_target_cpu, "(unknown)"))
+    device->llvm_target_cpu = NULL;
 
   // work-around LLVM bug where sizeof(long)=4
   #ifdef _CL_DISABLE_LONG
@@ -503,8 +507,10 @@ pocl_basic_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
       else
         {
           b = pocl_memalign_alloc(MAX_EXTENDED_ALIGNMENT, mem_obj->size);
-          if (b == NULL)
+          if (b == NULL){
+            printf("align:%d, size:%d\n",MAX_EXTENDED_ALIGNMENT,mem_obj->size);
             return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+          }
         }
 
       if (flags & CL_MEM_COPY_HOST_PTR)
@@ -560,6 +566,7 @@ pocl_basic_run
 (void *data, 
  _cl_command_node* cmd)
 {
+  printf("start pocl_basic_run\n");fflush(stdout);fflush(stderr);
   struct data *d;
   struct pocl_argument *al;
   size_t x, y, z;
@@ -576,6 +583,7 @@ pocl_basic_run
       sizeof(void*) * (kernel->num_args + kernel->num_locals)
     );
 
+  printf("start handling args\n");fflush(stdout);fflush(stderr);
   /* Process the kernel arguments. Convert the opaque buffer
      pointers to real device pointers, allocate dynamic local 
      memory buffers, etc. */
@@ -635,6 +643,13 @@ pocl_basic_run
       *(void **)(arguments[i]) = pocl_basic_malloc (data, 0, al->size, NULL);
     }
 
+  printf("start running wg\n");fflush(stdout);fflush(stderr);
+  char* wg_file = "wg_array.h";
+  char wg_header[300];
+  int wg_header_size = snprintf(wg_header, 300, "char wg_array[%u][%u] = {\n",
+      pc->num_groups[0] * pc->num_groups[1] * pc->num_groups[2],
+      sizeof(struct pocl_context));
+  pocl_write_file(wg_file, wg_header, wg_header_size, 0, 0);
   for (z = 0; z < pc->num_groups[2]; ++z)
     {
       for (y = 0; y < pc->num_groups[1]; ++y)
@@ -645,11 +660,49 @@ pocl_basic_run
               pc->group_id[1] = y;
               pc->group_id[2] = z;
 
+              char* start_line = "{";
+              pocl_write_file(wg_file, start_line, 1, 1, 1);
+              for(i = 0; i < sizeof(struct pocl_context); i++) {
+                char byte_text[5];
+                snprintf(byte_text, 5, "%3u%c",((uint8_t*)pc)[i],
+                    i == sizeof(struct pocl_context)-1 ? ' ': ',');
+                pocl_write_file(wg_file, byte_text, 4, 1, 1);
+              }
+              char* end_line = "},\n";
+              char* end_file = "}};\n";
+              if(x == (pc->num_groups[0] - 1) &&  y == (pc->num_groups[1] - 1) && z == (pc->num_groups[2] - 1)) {
+                pocl_write_file(wg_file, end_file, 3, 1, 1);
+              } else {
+                pocl_write_file(wg_file, end_line, 3, 1, 1);
+              }
               cmd->command.run.wg (arguments, pc);
 
             }
         }
     }
+
+  // Generate Glue C code
+  char* glue_file = "glue.c";
+  //Includes
+  char include[100];
+  int include_size = snprintf(include, 100, "#include \"wg_array.h\"\n");
+  pocl_write_file(glue_file, include, include_size, 0, 0);
+  include_size = snprintf(include, 100, "#include <stdio.h>\n");
+  pocl_write_file(glue_file, include, include_size, 1, 1);
+  for(i = 0; i < kernel->num_args; i++) {
+    include_size = snprintf(include, 100, "#include \"input_%s.h\"\n", kernel->arg_info[i].name);
+    pocl_write_file(glue_file, include, include_size, 1, 1);
+  }
+  //kernel functions
+  char kernel_func[200];
+  int kernel_func_size = snprintf(kernel_func, 200, "extern void _pocl_launcher_%s_workgroup_fast(void** args, void* wg_struct);\n",kernel->name);
+  pocl_write_file(glue_file, kernel_func, kernel_func_size, 1, 1);
+  // Defines for later
+  kernel_func_size = snprintf(kernel_func, 200, "#define WG_LENGTH %u\n", 
+      pc->num_groups[0] * pc->num_groups[1] * pc->num_groups[2]);
+  pocl_write_file(glue_file, kernel_func, kernel_func_size, 1, 1);
+
+
   for (i = 0; i < kernel->num_args; ++i)
     {
       if (kernel->arg_info[i].is_local)
@@ -911,6 +964,7 @@ void check_compiler_cache (_cl_command_node *cmd)
   const char* module_fn = llvm_codegen (cmd->command.run.tmp_dir,
                                         cmd->command.run.kernel,
                                         cmd->device);
+  printf("dlopen:%s\n",module_fn);fflush(stdout);fflush(stderr);
   dlhandle = lt_dlopen (module_fn);
   if (dlhandle == NULL)
     {

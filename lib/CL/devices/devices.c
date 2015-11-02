@@ -233,6 +233,7 @@ pocl_init_devices()
       assert(pocl_device_ops[i].probe);
       device_count[i] = pocl_device_ops[i].probe(&pocl_device_ops[i]);
       pocl_num_devices += device_count[i];
+      printf("device:%d has %d devices\n",i,device_count[i]);
     }
 
   assert(pocl_num_devices > 0);

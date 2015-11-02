@@ -282,8 +282,10 @@ pocl_pthread_init (cl_device_id device, const char* parameters)
   device->num_partition_types = 0;
   device->partition_type = NULL;
 
-  if(!strcmp(device->llvm_cpu, "(unknown)"))
-    device->llvm_cpu = NULL;
+  if(!strcmp(device->llvm_host_cpu, "(unknown)"))
+    device->llvm_host_cpu = NULL;
+  if(!strcmp(device->llvm_target_cpu, "(unknown)"))
+    device->llvm_target_cpu = NULL;
 
   // work-around LLVM bug where sizeof(long)=4
   #ifdef _CL_DISABLE_LONG
@@ -604,15 +606,17 @@ pocl_pthread_run
     arguments->kernel_args = cmd->command.run.arguments;
 
     /* TODO: pool of worker threads to avoid syscalls here */
+    /*
     error = pthread_create (&threads[i],
                             NULL,
                             workgroup_thread,
                             arguments);
+                            */
     assert(!error);
   }
 
   for (i = 0; i < num_threads; ++i) {
-    pthread_join(threads[i], NULL);
+    //pthread_join(threads[i], NULL);
 #ifdef DEBUG_MT       
     printf("### thread %u finished\n", (unsigned)threads[i]);
 #endif

@@ -82,10 +82,28 @@ AC_ARG_VAR([LLVM_CONFIG], [Program used to retrieve LLVM options and binaries])
 AC_PATH_PROGS([LLVM_CONFIG], [llvm-config llvm-config-mp-3.3 llvm-config-3.3 llvm-config33 llvm-config-mp-3.4 llvm-config-3.4 llvm-config34 llvm-config-mp-3.2 llvm-config-3.2 llvm-config32 ])
 test -z "$LLVM_CONFIG" && AC_MSG_FAILURE([no llvm-config found in \$PATH])
 
-LLVM_VERSION=`$LLVM_CONFIG --version`
-LLVM_BINDIR=`$LLVM_CONFIG --bindir`
-LLVM_LIBDIR=`$LLVM_CONFIG --libdir`
-LLVM_LDFLAGS=`$LLVM_CONFIG --ldflags`
+AS_IF([test "x$target" != "x$host"], [
+  AC_ARG_VAR([LLVM_CONFIG_HOST], [Program used to retrieve LLVM options and binaries])
+  AC_PATH_PROGS([LLVM_CONFIG_HOST], [llvm-config-host llvm-config-host-3.3 llvm-config-host-3.4 llvm-config-host-3.2 ])
+])
+
+# TODO: check that these should be blank/HOST
+AS_IF([test "x$target" != "x$host"], [
+  LLVM_VERSION=`$LLVM_CONFIG --version`
+  LLVM_BINDIR=`$LLVM_CONFIG --bindir`
+  LLVM_LIBDIR=`$LLVM_CONFIG --libdir`
+  LLVM_LDFLAGS=`$LLVM_CONFIG --ldflags`
+  LLVM_VERSION_HOST=`$LLVM_CONFIG_HOST --version`
+  LLVM_BINDIR_HOST=`$LLVM_CONFIG --bindir`
+  LLVM_LIBDIR_HOST=`$LLVM_CONFIG_HOST --libdir`
+  LLVM_LDFLAGS_HOST=`$LLVM_CONFIG_HOST --ldflags`
+], [
+  LLVM_VERSION=`$LLVM_CONFIG --version`
+  LLVM_BINDIR=`$LLVM_CONFIG --bindir`
+  LLVM_LIBDIR=`$LLVM_CONFIG --libdir`
+  LLVM_LDFLAGS=`$LLVM_CONFIG --ldflags`
+])
+
 # Whether we can use our own printf implementation
 NEW_PRINTF_WORKS=true
 LLVM_3_6=false
@@ -107,16 +125,28 @@ case "$LLVM_VERSION" in
    ;;
      3.5*)
      AC_DEFINE([LLVM_3_5], [], "Using LLVM 3.5")
-     LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     AS_IF([test "x$target" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     ])
    ;;
      3.6*)
      AC_DEFINE([LLVM_3_6], [], "Using LLVM 3.6")
      LLVM_3_6=true
-     LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     AS_IF([test "x$target" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     ])
    ;;
      3.7*)
      AC_DEFINE([LLVM_3_7], [], "Using LLVM svn, upcoming 3.7")
-     LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     AS_IF([test "x$target" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
+     ])
    ;;
      *)
    AC_MSG_ERROR(
@@ -129,6 +159,7 @@ esac
 
 AM_CONDITIONAL([LLVM_3_6], [test "x$LLVM_3_6" = "xtrue"])
 
+# TODO: llvm can't always be linked with ldflags? for cross compile we may need to use host/target flags
 AC_SUBST([LLVM_LDFLAGS], [$LLVM_LDFLAGS], [llvm-config returned ldflags])
 AM_CONDITIONAL([NEW_PRINTF_WORKS], $NEW_PRINTF_WORKS)
 
@@ -593,6 +624,8 @@ AC_SUBST([OPENCL_EXTLIBS])
 ####################################################################
 # OpenCL headers
 
+# TODO: install the header if we are cross compiling/they aren't found in the cross compile sysroot?
+
 # Option to install OpenCL header files
 # By default, do not install them unless none are found in the system include directories
 AC_ARG_ENABLE([install-opencl-headers],
@@ -625,6 +658,7 @@ fi
 AM_CONDITIONAL([HAVE_OPENCL_HPP], true)
 AC_DEFINE([HAVE_OPENCL_HPP], [] ,[Defined if system cl.hpp found to be working])
 
+# TODO: disable for simple riscv build
 # libtool dynamic library handling library
 old_LIBS="$LIBS"
 LIBS=
@@ -724,6 +758,7 @@ fi
 
 # Targets.
 # This is the target architecture of the basic and pthreads devices.
+# TODO: they are not always the same now
 # These always are the same arch as host (in current pocl implementation).
 # Also, this is the autoconf "host".
 # We have:
@@ -733,9 +768,9 @@ fi
 # The option for specifying the target changed; try the modern syntax
 # first, and fall back to the old-style syntax if this failed
 AC_MSG_CHECKING([Clang option to specify the target])
-if [ $CLANG --target=$host -x c /dev/null -S -o - >/dev/null 2>&1 ]; then
+if [ $CLANG --target=$target -x c /dev/null -S -o - >/dev/null 2>&1 ]; then
   CLANG_TARGET_OPTION='--target='
-elif [ $CLANG -target $host -x c /dev/null -S -o - >/dev/null 2>&1 ]; then
+elif [ $CLANG -target $target -x c /dev/null -S -o - >/dev/null 2>&1 ]; then
   CLANG_TARGET_OPTION='-target '
 else
   AC_MSG_ERROR([Cannot determine Clang option to specify the target])
@@ -753,12 +788,13 @@ if test ! -z "$CLANGXX"; then
 
 AC_LANG([C++])
 
-CLANGXX_FLAGS="${CLANG_TARGET_OPTION}$host ${CLANGXX_FLAGS}"
+CLANGXX_HOST_FLAGS="${CLANG_TARGET_OPTION}$host ${CLANGXX_FLAGS}"
+CLANGXX_TARGET_FLAGS="${CLANG_TARGET_OPTION}$target ${CLANGXX_FLAGS}"
 
 old_CXX=$CXX
 CXX=$CLANGXX
 old_CXXFLAGS=$CXXFLAGS
-CXXFLAGS=$CLANGXX_FLAGS
+CXXFLAGS=$CLANGXX_HOST_FLAGS
 old_LDFLAGS=$LDFLAGS
 old_LIBS=$LIBS
 
@@ -779,14 +815,16 @@ AC_COMPILE_IFELSE(
       use_vecmathlib=yes
    fi
    AC_DEFINE_UNQUOTED([CLANGXX], ["$CLANGXX"], [clang++ executable])
-   AC_DEFINE_UNQUOTED([CLANGXX_FLAGS], ["$CLANGXX_FLAGS"], [clang++ compiler flags])
+   AC_DEFINE_UNQUOTED([CLANGXX_HOST_FLAGS], ["$CLANGXX_HOST_FLAGS"], [clang++ host compiler flags])
+   AC_DEFINE_UNQUOTED([CLANGXX_TARGET_FLAGS], ["$CLANGXX_TARGET_FLAGS"], [clang++ target compiler flags])
   ],
   [AC_MSG_RESULT(no)
    CLANGXX=""
-   CLANGXX_FLAGS=""])
+   CLANGXX_HOST_FLAGS=""
+   CLANGXX_TARGET_FLAGS=""])
 
 #
-# A few work-arounds for llvm-config issues
+## A few work-arounds for llvm-config issues
 # - '-fno-rtti' is a work-around for llvm bug 14200 - this should be fixed in 3.7
 # - '-DNDEBUG' is a work-around for llvm bug 18253
 # - pocl doesn't compile with '-pedantic'
@@ -835,7 +873,8 @@ CLFLAGS="$CLFLAGS -D__OPENCL_VERSION__=120"
 AM_CONDITIONAL([CLANGXX_AVAILABLE], test ! -z $CLANGXX)
 
 AC_ARG_VAR([CLFLAGS], [Flags to be used when compiling CL sources])
-AC_ARG_VAR([CLANGXX_FLAGS], [Flags to be used when compiling C++ sources with clang])
+AC_ARG_VAR([CLANGXX_HOST_FLAGS], [Flags to be used when compiling C++ sources with host clang])
+AC_ARG_VAR([CLANGXX_TARGET_FLAGS], [Flags to be used when compiling C++ sources with target clang])
 
 use_vecmathlib_builtins="no"
 AC_ARG_ENABLE([vecmathlib-builtins],
@@ -844,7 +883,8 @@ AC_ARG_ENABLE([vecmathlib-builtins],
 if test "$use_vecmathlib_builtins" = "yes"
 then
 	CLFLAGS="$CLFLAGS -DPOCL_VECMATHLIB_BUILTIN"
-	CLANGXX_FLAGS="$CLANGXX_FLAGS -DPOCL_VECMATHLIB_BUILTIN"
+	CLANGXX_HOST_FLAGS="$CLANGXX_HOST_FLAGS -DPOCL_VECMATHLIB_BUILTIN"
+	CLANGXX_TARGET_FLAGS="$CLANGXX_TARGET_FLAGS -DPOCL_VECMATHLIB_BUILTIN"
 fi
 
 AC_DEFINE_UNQUOTED([CLANG], ["$CLANG"], [clang executable.])
@@ -887,7 +927,10 @@ HOST_LLC_FLAGS="-relocation-model=pic"
 HOST_AS_FLAGS=""
 HOST_LD_FLAGS="$LD_SHARED"
 
-
+TARGET_CLANG_FLAGS=""
+TARGET_LLC_FLAGS="-relocation-model=pic"
+TARGET_AS_FLAGS=""
+TARGET_LD_FLAGS="$LD_SHARED"
 
 # TODO: We need to set both target-triple and cpu-type when
 # building, since the ABI depends on both. We can either add flags
@@ -903,11 +946,18 @@ HOST_LD_FLAGS="$LD_SHARED"
 # depending on whether they are generated via clang or directly
 # via llc.
 
-AC_MSG_CHECKING([LLC target triple (for host $host)])
+AC_MSG_CHECKING([LLC target triple (for target $target)])
 dnl The quadrigraphs @<:@ and @:>@ turn into [ and ].
-llc_triple=$($CLANG ${CLANG_TARGET_OPTION}$host -x c /dev/null -S -emit-llvm -o - | grep -e 'target triple' | perl -p -e 's/^.*target triple = "+(@<:@^ @:>@+).*"$/\1/')
-AC_MSG_RESULT($llc_triple)
-test -z "$llc_triple" && AC_MSG_ERROR([Cannot determine LLC target triple])
+llc_target_triple=$($CLANG ${CLANG_TARGET_OPTION}$target -x c /dev/null -S -emit-llvm -o - | grep -e 'target triple' | perl -p -e 's/^.*target triple = "+(@<:@^ @:>@+).*"$/\1/')
+AC_MSG_RESULT($llc_target_triple)
+test -z "$llc_target_triple" && AC_MSG_ERROR([Cannot determine LLC target triple])
+
+AC_MSG_CHECKING([LLC host triple (for host $host)])
+dnl The quadrigraphs @<:@ and @:>@ turn into [ and ].
+llc_host_triple=$($CLANG ${CLANG_TARGET_OPTION}$host -x c /dev/null -S -emit-llvm -o - | grep -e 'target triple' | perl -p -e 's/^.*target triple = "+(@<:@^ @:>@+).*"$/\1/')
+AC_MSG_RESULT($llc_host_triple)
+test -z "$llc_host_triple" && AC_MSG_ERROR([Cannot determine LLC host triple])
+
 AC_MSG_CHECKING([LLC host CPU])
 llc_host_cpu=$($LLC --version | grep 'Host CPU' | sed -e 's/^ *Host CPU: *//')
 
@@ -952,32 +1002,32 @@ case $host_cpu in
     case $host in
       #armv7l seems a popular host_cpu in distros. Clang uses "armv7", though
       arm*android*)
-         llc_triple="armv7-unknown-linux-gnueabi"
+         llc_host_triple="armv7-unknown-linux-gnueabi"
          AC_DEFINE([HOST_FLOAT_SOFT_ABI], [], ["Use soft-float ABI to support most of android devices"])
          HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -mfloat-abi=soft -I"$SYSROOTDIR"/usr/include "
          HOST_LLC_FLAGS="$HOST_LLC_FLAGS -float-abi=soft"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mcpu=$llc_host_cpu -mfloat-abi=soft"
          HOST_LD_FLAGS="$HOST_LD_FLAGS -L/system/lib/ -shared -ldl -lc -lm /system/lib/crtbegin_so.o /system/lib/crtend_so.o";;
       armv7l*gnueabihf)
-         llc_triple="armv7-unknown-linux-gnueabihf"
+         llc_host_triple="armv7-unknown-linux-gnueabihf"
          HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -mfloat-abi=hard"
          HOST_LLC_FLAGS="$HOST_LLC_FLAGS -float-abi=hard"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mfloat-abi=hard";;
       armv7l*gnueabi)
-         llc_triple="armv7-unknown-linux-gnueabi"
+         llc_host_triple="armv7-unknown-linux-gnueabi"
          AC_DEFINE([HOST_FLOAT_SOFT_ABI], [], ["basic and pthreads devices use soft-float ABI"])
          HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -mfloat-abi=soft"
          HOST_LLC_FLAGS="$HOST_LLC_FLAGS -float-abi=soft"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mcpu=$llc_host_cpu"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mfloat-abi=soft";;
       armv7hl-suse-linux-gnueabi)
-         llc_triple="armv7hl-suse-linux-gnueabi"
+         llc_host_triple="armv7hl-suse-linux-gnueabi"
          HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -mfloat-abi=hard"
          HOST_LLC_FLAGS="$HOST_LLC_FLAGS -float-abi=hard"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mcpu=$llc_host_cpu"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mfloat-abi=hard";;
       armv7hl-redhat-linux-gnu)
-         llc_triple="armv7hl-redhat-linux-gnueabi"
+         llc_host_triple="armv7hl-redhat-linux-gnueabi"
          HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -mfloat-abi=hard"
          HOST_LLC_FLAGS="$HOST_LLC_FLAGS -float-abi=hard"
          HOST_AS_FLAGS="$HOST_AS_FLAGS -mcpu=$llc_host_cpu"
@@ -985,7 +1035,7 @@ case $host_cpu in
        *)
          #this is for old arm distros (pre-hardfloat),
          #probably not used, and kept here "just in case"
-         llc_triple="armv7";;
+         llc_host_triple="armv7";;
     esac
     CLANG_MARCH_FLAG=mcpu
 
@@ -1007,14 +1057,14 @@ case $host_cpu in
   tce)
     AC_MSG_NOTICE([using the TCE optimized kernel lib for the native device])
     HOST_LD_FLAGS="$HOST_LD_FLAGS -lm"
-    llc_triple=tce-tut-llvm
+    llc_host_triple=tce-tut-llvm
     ;;
 
   powerpc64*)
     test ${LLVM_VERSION:0:3} == "3.4" && AC_MSG_ERROR([LLVM 3.4 fails on PowerPC, use 3.3])
     AC_MSG_NOTICE([using the ppc64 optimized kernel lib for the native device])
     HOST_LD_FLAGS="$HOST_LD_FLAGS -lm"
-    llc_triple="powerpc64-unknown-linux-gnu"
+    llc_host_triple="powerpc64-unknown-linux-gnu"
     CL_DEVICE_ADDRESS_BITS=32
     #TODO: not all PowerPCs have Altivec?
     HOST_LLC_FLAGS="$HOST_LLC_FLAGS -mattr=altivec"
@@ -1027,24 +1077,30 @@ case $host_cpu in
     #but the operating system is 32 bit. 
     AC_MSG_NOTICE([using the ppc64 optimized kernel lib for the native device])
     HOST_LD_FLAGS="$HOST_LD_FLAGS -lm"
-    llc_triple="powerpc-unknown-linux-gnu"
+    llc_host_triple="powerpc-unknown-linux-gnu"
     CL_DEVICE_ADDRESS_BITS=32
     #Altivec on PPC32 seems to have a few codegen issues
     use_vecmathlib=""
-    HOST_AS_FLAGS="$HOST_AS_FLAGS ${CLANG_TARGET_OPTION}$llc_triple"
+    HOST_AS_FLAGS="$HOST_AS_FLAGS ${CLANG_TARGET_OPTION}$llc_host_triple"
     CLANG_MARCH_FLAG="mcpu"
     ;;
 
   mipsel*)
-    llc_triple="mipsel-unknown-linux-gnu"
+    llc_host_triple="mipsel-unknown-linux-gnu"
     CLANG_MARCH_FLAG=mcpu
     CL_DEVICE_ADDRESS_BITS=32
     ;;
 
   mips*)
-    llc_triple="mips-unknown-linux-gnu"
+    llc_host_triple="mips-unknown-linux-gnu"
     CLANG_MARCH_FLAG=mcpu
     CL_DEVICE_ADDRESS_BITS=32
+    ;;
+
+  riscv*)
+    llc_host_triple="riscv64-unknown-linux-gnu"
+    CLANG_MARCH_FLAG="mcpu"
+    CL_DEVICE_ADDRESS_BITS=64
     ;;
 
   *)
@@ -1052,16 +1108,52 @@ case $host_cpu in
     ;;
 esac
 
+AS_IF([test "x$target" != "x$host"], [
+  llc_target_cpu="(unknown)"
+], [
+  llc_target_cpu=llc_host_cpu
+])
 
-kernel_dir="host"
-OCL_TARGETS=$kernel_dir
-HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS ${CLANG_TARGET_OPTION}$llc_triple"
-HOST_LLC_FLAGS="$HOST_LLC_FLAGS -mtriple=$llc_triple"
-if test "$llc_host_cpu" != "(unknown)"
-then
-  HOST_CLANG_FLAGS="$HOST_CLANG_FLAGS -$CLANG_MARCH_FLAG=$llc_host_cpu"
-  HOST_LLC_FLAGS="$HOST_LLC_FLAGS -mcpu=$llc_host_cpu"
-fi
+
+AS_IF([test "x$target" != "x$host"], [
+  AC_MSG_NOTICE([target_cpu $target_cpu])
+  case $target_cpu in
+    riscv*)
+      AC_MSG_NOTICE([riscv target cpu])
+      llc_triple="riscv64-unknown-linux-gnu"
+      llc_target_cpu="RV64IMAFD"
+      use_vecmathlib=""
+      CLANG_MARCH_FLAG="mcpu"
+      CL_DEVICE_ADDRESS_BITS=64
+      CLANGXX_TARGET_FLAGS="$CLANGXX_TARGET_FLAGS -I$RISCV/riscv64-unknown-linux-gnu/include/c++/5.2.0 -I$RISCV/riscv64-unknown-linux-gnu/include/c++/5.2.0/riscv64-unknown-linux-gnu "
+      ;;
+  
+    *)
+      AC_MSG_WARN([unknown/unsupported target $target])
+      ;;
+  esac
+],[
+   llc_triple=$llc_host_triple
+   llc_target_cpu=$llc_host_cpu
+])
+
+AS_IF([test "x$target" != "x$host"], [
+  AC_MSG_NOTICE([setting up target flags])
+  kernel_dir="target"
+  OCL_TARGETS="host $kernel_dir"
+  TARGET_CLANG_FLAGS="$TARGET_CLANG_FLAGS ${CLANG_TARGET_OPTION}$llc_triple"
+  TARGET_LLC_FLAGS="$TARGET_LLC_FLAGS -mtriple=$llc_triple"
+  # TODO: detect/accept target CPU to pass to llc/clang
+  if test "$llc_target_cpu" != "(unknown)"
+  then
+    TARGET_CLANG_FLAGS="$TARGET_CLANG_FLAGS -$CLANG_MARCH_FLAG=$llc_target_cpu"
+    TARGET_LLC_FLAGS="$TARGET_LLC_FLAGS -mcpu=$llc_target_cpu"
+  fi
+],[
+  AC_MSG_NOTICE([Not setting up target flags])
+  kernel_dir="host"
+  OCL_TARGETS="$kernel_dir"
+])
 
 # Work-around a clang bug in LLVM 3.3: On 32-bit platforms, the size
 # of Open CL C long is not 8 bytes 
@@ -1094,10 +1186,14 @@ AC_SUBST([HOST], [$host])
 AC_DEFINE_UNQUOTED([HOST], "$host", [The host triple.])
 AC_SUBST([HOST_CPU], [$host_cpu])
 AC_DEFINE_UNQUOTED([HOST_CPU], ["$host_cpu"], [The host CPU type.])
+AC_SUBST([OCL_KERNEL_HOST],[$llc_host_triple])
+AC_DEFINE_UNQUOTED([OCL_KERNEL_HOST], ["$llc_host_triple"], [The kernel host triplet.])
 AC_SUBST([OCL_KERNEL_TARGET],[$llc_triple])
 AC_DEFINE_UNQUOTED([OCL_KERNEL_TARGET], ["$llc_triple"], [The kernel target triplet.])
-AC_SUBST([OCL_KERNEL_TARGET_CPU],[$llc_host_cpu])
-AC_DEFINE_UNQUOTED([OCL_KERNEL_TARGET_CPU], ["$llc_host_cpu"], [The kernel target CPU variant.])
+AC_SUBST([OCL_KERNEL_TARGET_CPU],[$llc_target_cpu])
+AC_DEFINE_UNQUOTED([OCL_KERNEL_TARGET_CPU], ["$llc_target_cpu"], [The kernel target CPU variant.])
+AC_SUBST([OCL_KERNEL_HOST_CPU],[$llc_host_cpu])
+AC_DEFINE_UNQUOTED([OCL_KERNEL_HOST_CPU], ["$llc_host_cpu"], [The kernel host CPU variant.])
 AC_SUBST([OCL_KERNEL_ARCH],[$OCL_KERNEL_ARCH])
 AC_DEFINE_UNQUOTED([OCL_KERNEL_ARCH], ["$OCL_KERNEL_ARCH"], [The kernel architecture.])
 
@@ -1119,6 +1215,24 @@ AC_DEFINE_UNQUOTED([HOST_LD_FLAGS],
                    ["$HOST_LD_FLAGS"],
                    [Parameter to compiler to generate loadable module.])
 
+AC_ARG_VAR([TARGET_CLANG_FLAGS],
+           [Parameters to for target compilation.])
+AC_DEFINE_UNQUOTED([TARGET_CLANG_FLAGS],
+                   ["$TARGET_CLANG_FLAGS"],
+                   [Parameters to for target compilation.])
+AC_ARG_VAR([TARGET_LLC_FLAGS])
+AC_DEFINE_UNQUOTED([TARGET_LLC_FLAGS],
+                   ["$TARGET_LLC_FLAGS"], 
+                   [Parameters to llc for code generation in the target.])
+AC_ARG_VAR([TARGET_AS_FLAGS])
+AC_DEFINE_UNQUOTED([TARGET_AS_FLAGS],
+                   ["$TARGET_AS_FLAGS"], 
+                   [Parameters to as for code generation in the target.])
+AC_SUBST([TARGET_LD_FLAGS])
+AC_DEFINE_UNQUOTED([TARGET_LD_FLAGS],
+                   ["$TARGET_LD_FLAGS"],
+                   [Parameter to compiler to generate loadable module.])
+
 AC_SUBST([POCL_DEVICE_ADDRESS_BITS], [$CL_DEVICE_ADDRESS_BITS])
 AC_DEFINE_UNQUOTED([POCL_DEVICE_ADDRESS_BITS],
                    [$CL_DEVICE_ADDRESS_BITS],
@@ -1127,7 +1241,8 @@ AC_DEFINE_UNQUOTED([POCL_DEVICE_ADDRESS_BITS],
 AM_CONDITIONAL([USE_VECMATHLIB], test ! -z "$use_vecmathlib")
 if test x"$use_vecmathlib" = xyes; then
   AC_DEFINE([USE_VECMATHLIB], [], "Use vecmathlib if available for the target.")
-  CLANGXX_FLAGS="$CLANGXX_FLAGS -DVML_NO_IOSTREAM"
+  CLANGXX_HOST_FLAGS="$CLANGXX_HOST_FLAGS -DVML_NO_IOSTREAM"
+  CLANGXX_TARGET_FLAGS="$CLANGXX_TARGET_FLAGS -DVML_NO_IOSTREAM"
 fi
 
 
@@ -1561,6 +1676,7 @@ AC_CONFIG_FILES([Makefile
                  lib/kernel/Makefile
                  lib/kernel/cellspu/Makefile
                  lib/kernel/host/Makefile
+                 lib/kernel/target/Makefile
                  lib/kernel/tce/Makefile
                  lib/kernel/amdgcn/Makefile
                  lib/kernel/hsail64/Makefile
@@ -1571,7 +1687,6 @@ AC_CONFIG_FILES([Makefile
                  examples/example1-spir32/Makefile
                  examples/example2/Makefile
                  examples/example2a/Makefile
-                 examples/standalone/Makefile
                  examples/trig/Makefile
                  examples/scalarwave/Makefile
                  examples/opencl-book-samples/Makefile

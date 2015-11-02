@@ -79,6 +79,19 @@ POname(clEnqueueReadBuffer)(cl_command_queue command_queue,
   POname(clRetainMemObject) (buffer);
   pocl_command_enqueue(command_queue, cmd);
 
+    POname(clFinish) (command_queue);
+  //COLIN FIXME: this might only work if they finish before reading
+          char* name = get_mem_arg_map(buffer);
+          put_output_arg_map(name, 1);
+          char input_file[POCL_FILENAME_LENGTH];
+          snprintf(input_file, POCL_FILENAME_LENGTH,"input_%s.h", name);
+          //printf("Writing %u bytes to %s\n",cb,input_file);
+          for(i = 0; i < cb; i++) {
+            char byte_text[6];
+            snprintf(byte_text,6,"%3u,\n",((uint8_t*)cmd->command.read.host_ptr)[i]);
+            pocl_write_file(input_file, byte_text, 5, 1, 1);
+          }
+
   if (blocking_read)
     POname(clFinish) (command_queue);
 

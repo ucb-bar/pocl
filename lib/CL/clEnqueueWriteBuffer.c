@@ -25,6 +25,7 @@
 #include "utlist.h"
 #include <assert.h>
 #include "pocl_util.h"
+#include "pocl_map.h"
 
 CL_API_ENTRY cl_int CL_API_CALL
 POname(clEnqueueWriteBuffer)(cl_command_queue command_queue,
@@ -86,6 +87,26 @@ POname(clEnqueueWriteBuffer)(cl_command_queue command_queue,
   cmd->command.write.buffer = buffer;
   POname(clRetainMemObject) (buffer);
   pocl_command_enqueue(command_queue, cmd);
+
+  cl_mem_t* m = (cl_mem_t*)&buffer;
+          char* name = get_mem_arg_map(buffer);
+          //printf("buffer->flags:%d\n",buffer->flags);
+          //printf("write_only:%d\n",CL_MEM_WRITE_ONLY);
+          //printf("read_only:%d\n",CL_MEM_READ_ONLY);
+          if(name != 0 && buffer->flags != CL_MEM_WRITE_ONLY) {
+            put_output_arg_map(name, 0);
+            char input_file[POCL_FILENAME_LENGTH];
+            snprintf(input_file, POCL_FILENAME_LENGTH,"input_%s.h", name);
+            //printf("Writing %u bytes to %s\n",cb,input_file);
+            for(i = 0; i < cb; i++) {
+              char byte_text[6];
+              snprintf(byte_text,6,"%3d,\n",((uint8_t*)ptr)[i]);
+              pocl_write_file(input_file, byte_text, 5, 1, 1);
+            }
+          } else {
+            // Not writing it to the file now
+            put_buffer_arg_map(buffer, ptr);
+          }
   
   if (blocking_write)
     POname(clFinish) (command_queue);

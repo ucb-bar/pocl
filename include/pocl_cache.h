@@ -26,7 +26,7 @@
 
 /* The filename in which the work group (parallelizable) kernel LLVM bc is stored in
    the kernel's temp dir. */
-#define POCL_PARALLEL_BC_FILENAME   "/parallel.bc"
+#define POCL_PARALLEL_BC_FILENAME   "parallel.bc"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,7 +44,7 @@ void pocl_cache_init_topdir();
 int
 pocl_cache_create_program_cachedir(cl_program program, unsigned device_i,
                                    const char* preprocessed_source, size_t source_len,
-                                   char *program_bc_path, void **cache_lock);
+                                   char *target_program_bc_path, char *host_program_bc_path, void **cache_lock);
 
 void pocl_cache_cleanup_cachedir(cl_program program);
 
@@ -108,7 +108,8 @@ int pocl_cache_write_kernel_parallel_bc(void*        bc,
 
 void pocl_cache_program_bc_path(char*       program_bc_path,
                                cl_program   program,
-                               unsigned     device_i);
+                               unsigned     device_i,
+                               char*        append);
 
 void pocl_cache_work_group_function_so_path(char* kernel_so_path, cl_program program,
                               unsigned device_i, cl_kernel kernel,

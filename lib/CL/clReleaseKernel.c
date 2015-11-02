@@ -35,8 +35,65 @@ POname(clReleaseKernel)(cl_kernel kernel) CL_API_SUFFIX__VERSION_1_0
 
   POCL_RELEASE_OBJECT (kernel, new_refcount);
 
+
   if (new_refcount == 0)
     {
+  //Fix up include_* files
+  char include[100];
+  char* end_file = "};";
+  for(i = 0; i < kernel->num_args; i++) {
+    if(kernel->arg_info[i].type == POCL_ARG_TYPE_POINTER) {
+      snprintf(include, 100, "input_%s.h", kernel->arg_info[i].name);
+      pocl_write_file(include, end_file, 2, 1, 1);
+    }
+  }
+  // Write Main Body
+  char* glue_file = "glue.c";
+  char main_body[200];
+  int main_body_size = snprintf(main_body, 200, "\nint main() {\n");
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+
+  for(i = 0; i < kernel->num_args; i++) {
+    if(get_output_arg_map(kernel->arg_info[i].name) == 1) {
+      main_body_size = snprintf(main_body, 200, "  char test_%s[sizeof(%s)];\n",
+        kernel->arg_info[i].name,
+        kernel->arg_info[i].name);
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+    }
+  }
+
+  main_body_size = snprintf(main_body, 200, "  void* args[WG_LENGTH] = {");
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+  for(i = 0; i < kernel->num_args; i++) {
+    if(get_output_arg_map(kernel->arg_info[i].name) == 1) {
+      main_body_size = snprintf(main_body, 200, " &test_%s%c", kernel->arg_info[i].name, i == kernel->num_args - 1 ? '}' : ',');
+    } else {
+      main_body_size = snprintf(main_body, 200, " &%s%c", kernel->arg_info[i].name, i == kernel->num_args - 1 ? '}' : ',');
+    }
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+  }
+  main_body_size = snprintf(main_body, 200, ";\n  for(int i = 0; i < WG_LENGTH; i++) {\n");
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+  main_body_size = snprintf(main_body, 200, "    _pocl_launcher_%s_workgroup_fast(args, wg_array[i]);\n",kernel->name);
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+  main_body_size = snprintf(main_body, 200, "  }\n",kernel->name);
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+  // check outputs
+  for(i = 0; i < kernel->num_args; i++) {
+    if(get_output_arg_map(kernel->arg_info[i].name) == 1) {
+      main_body_size = snprintf(main_body, 200, "  for(int i = 0; i < sizeof(%s); i++) {\n", kernel->arg_info[i].name);
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+      main_body_size = snprintf(main_body, 200, "    if(%s[i] != test_%s[i]) { \n",
+          kernel->arg_info[i].name, kernel->arg_info[i].name);
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+      main_body_size = snprintf(main_body, 200, "      printf(\"FAIL\\n\");\n      return 1;\n");
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+      main_body_size = snprintf(main_body, 200, "    }\n  }\n");
+      pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
+    }
+  }
+  main_body_size = snprintf(main_body, 200, "  printf(\"PASS\\n\");\n  return 0;\n}\n");
+  pocl_write_file(glue_file, main_body, main_body_size, 1, 1);
 
       if (kernel->program != NULL)
         {
