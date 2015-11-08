@@ -235,6 +235,8 @@ Workgroup::runOnModule(Module &M)
   return true;
 }
 
+static SmallVector<StringRef, 8> processed_kernels;
+
 static Function *
 createLauncher(Module &M, Function *F)
 {
@@ -243,7 +245,25 @@ createLauncher(Module &M, Function *F)
   for (Function::const_arg_iterator i = F->arg_begin(), e = F->arg_end();
        i != e; ++i)
     sv.push_back (i->getType());
-  sv.push_back(TypeBuilder<PoclContext*, true>::get(M.getContext()));
+  //instead of pushing back a struct we calling it with elements of the struct
+  PointerType* pocl_context_type = TypeBuilder<PoclContext*, true>::get(M.getContext());
+  unsigned context_index;
+  context_index = sv.size();
+  if(Workgroup::shouldExpandStruct(*F)){
+    // colins FIXME: should just be a call to a flatten helper function
+    sv.push_back(cast<StructType>(pocl_context_type->getElementType())->getElementType(0));
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(1))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(1))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(1))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(2))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(2))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(2))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(3))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(3))->getElementType());
+    sv.push_back(cast<ArrayType>(cast<StructType>(pocl_context_type->getElementType())->getElementType(3))->getElementType());
+  } else {
+    sv.push_back(pocl_context_type);
+  }
 
   FunctionType *ft = FunctionType::get(Type::getVoidTy(M.getContext()),
 				       ArrayRef<Type *> (sv),
@@ -267,6 +287,19 @@ createLauncher(Module &M, Function *F)
   /* Copy the function attributes to transfer noalias etc. from the
      original kernel which will be inlined into the launcher. */
   L->setAttributes(F->getAttributes());
+  // Also transfer metadata (this now the opencl kernel)
+  llvm::NamedMDNode *nmd = M.getNamedMetadata("opencl.kernels");
+  for (unsigned i = 0, e = nmd->getNumOperands(); i != e; ++i) {
+    llvm::MDNode *kernel_iter = nmd->getOperand(i);
+    llvm::Function *k = 
+      cast<Function>(
+        dyn_cast<llvm::ValueAsMetadata>(kernel_iter->getOperand(0))->getValue());
+    if (k->getName() == F->getName()) {
+      kernel_iter->replaceOperandWith(0, llvm::ValueAsMetadata::get(L));
+      processed_kernels.push_back(L->getName());
+    }
+  }
+  
 
   Value *ptr, *v;
   char s[STRING_LENGTH];
@@ -274,17 +307,22 @@ createLauncher(Module &M, Function *F)
 
   IRBuilder<> builder(BasicBlock::Create(M.getContext(), "", L));
 
-#if defined LLVM_OLDER_THAN_3_7
-  ptr = builder.CreateStructGEP(ai,
-				TypeBuilder<PoclContext, true>::WORK_DIM);
-#else
-  ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
-                                TypeBuilder<PoclContext, true>::WORK_DIM);
-#endif
   gv = M.getGlobalVariable("_work_dim");
-  if (gv != NULL) {
-    v = builder.CreateLoad(builder.CreateConstGEP1_32(ptr, 0));
-    builder.CreateStore(v, gv);
+  if(Workgroup::shouldExpandStruct(*F)) {
+    if (gv != NULL)
+      builder.CreateStore(ai, gv);//struct[0]
+  } else {
+#if defined LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::WORK_DIM);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                  TypeBuilder<PoclContext, true>::WORK_DIM);
+#endif
+    if (gv != NULL) {
+      v = builder.CreateLoad(builder.CreateConstGEP1_32(ptr, 0));
+      builder.CreateStore(v, gv);
+    }
   }
 
 
@@ -298,33 +336,7 @@ createLauncher(Module &M, Function *F)
 #endif
     size_t_width = 64;
 
-#if defined LLVM_OLDER_THAN_3_7
-  ptr = builder.CreateStructGEP(ai,
-				TypeBuilder<PoclContext, true>::GROUP_ID);
-#else
-  ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
-                                TypeBuilder<PoclContext, true>::GROUP_ID);
-#endif
-  for (int i = 0; i < 3; ++i) {
-    snprintf(s, STRING_LENGTH, "_group_id_%c", 'x' + i);
-    gv = M.getGlobalVariable(s);
-    if (gv != NULL) {
-      if (size_t_width == 64)
-        {
-          v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
-        }
-      else
-        {
-#ifdef LLVM_OLDER_THAN_3_7
-          v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
-#else
-          v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
-#endif
-        }
-      builder.CreateStore(v, gv);
-    }
-  }
-
+  if(!Workgroup::shouldExpandStruct(*F)) {
 #ifdef LLVM_OLDER_THAN_3_7
   ptr = builder.CreateStructGEP(ai,
 				TypeBuilder<PoclContext, true>::NUM_GROUPS);
@@ -332,10 +344,16 @@ createLauncher(Module &M, Function *F)
   ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
                                 TypeBuilder<PoclContext, true>::NUM_GROUPS);
 #endif
+  }
   for (int i = 0; i < 3; ++i) {
-    snprintf(s, STRING_LENGTH, "_num_groups_%c", 'x' + i);
+    snprintf(s, STRING_LENGTH, "_num_groups_%c", 'x' + i); // struct[1]
     gv = M.getGlobalVariable(s);
+    if(Workgroup::shouldExpandStruct(*F))
+      ai++;
     if (gv != NULL) {
+      if(Workgroup::shouldExpandStruct(*F)) {
+        v = ai;
+      } else {
       if (size_t_width == 64)
         {
           v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
@@ -348,21 +366,29 @@ createLauncher(Module &M, Function *F)
           v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
 #endif
         }
+      }
       builder.CreateStore(v, gv);
     }
   }
 
-#ifdef LLVM_OLDER_THAN_3_7
+  if(!Workgroup::shouldExpandStruct(*F)) {
+#if defined LLVM_OLDER_THAN_3_7
   ptr = builder.CreateStructGEP(ai,
-				TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+				TypeBuilder<PoclContext, true>::GROUP_ID);
 #else
   ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
-                                TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+                                TypeBuilder<PoclContext, true>::GROUP_ID);
 #endif
+  }
   for (int i = 0; i < 3; ++i) {
-    snprintf(s, STRING_LENGTH, "_global_offset_%c", 'x' + i);
+    snprintf(s, STRING_LENGTH, "_group_id_%c", 'x' + i); // struct[2]
     gv = M.getGlobalVariable(s);
+    if(Workgroup::shouldExpandStruct(*F))
+      ai++;
     if (gv != NULL) {
+      if(Workgroup::shouldExpandStruct(*F)) {
+        v = ai;
+      } else {
       if (size_t_width == 64)
         {
           v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
@@ -375,6 +401,43 @@ createLauncher(Module &M, Function *F)
           v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
 #endif
         }
+      }
+      builder.CreateStore(v, gv);
+    }
+  }
+
+
+  if(!Workgroup::shouldExpandStruct(*F)) {
+#ifdef LLVM_OLDER_THAN_3_7
+  ptr = builder.CreateStructGEP(ai,
+				TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#else
+  ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#endif
+  }
+  for (int i = 0; i < 3; ++i) {
+    snprintf(s, STRING_LENGTH, "_global_offset_%c", 'x' + i); // struct[3]
+    gv = M.getGlobalVariable(s);
+    if(Workgroup::shouldExpandStruct(*F))
+      ai++;
+    if (gv != NULL) {
+      if(Workgroup::shouldExpandStruct(*F)) {
+        v = ai;
+      } else {
+      if (size_t_width == 64)
+        {
+          v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+        }
+      else
+        {
+#ifdef LLVM_OLDER_THAN_3_7
+          v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+          v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+        }
+      }
       builder.CreateStore(v, gv);
     }
   }
@@ -530,9 +593,19 @@ createWorkgroup(Module &M, Function *F)
 {
   IRBuilder<> builder(M.getContext());
 
+  /*
+  Type *params[] = {
+    Type::getInt8Ty(M.getContext())->getPointerTo()->getPointerTo(),
+    Type::getInt32Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+  };
+  */
   FunctionType *ft =
     TypeBuilder<void(types::i<8>*[],
-		     PoclContext*), true>::get(M.getContext());
+                     PoclContext*), true>::get(M.getContext());
+    //FunctionType::get(Type::getVoidTy(M.getContext()), params, true);
 
   std::string funcName = "";
   funcName = F->getName().str();
@@ -547,8 +620,9 @@ createWorkgroup(Module &M, Function *F)
 
   SmallVector<Value*, 8> arguments;
   int i = 0;
-  for (Function::const_arg_iterator ii = F->arg_begin(), ee = F->arg_end();
-       ii != ee; ++ii) {
+  Function::const_arg_iterator ii = F->arg_begin();
+       //ii != ee; ++ii) {
+  for (i = 0; i < F->arg_size()-(1+3*3); i++) {
     Type *t = ii->getType();
 
     Value *gep = builder.CreateGEP(ai,
@@ -574,10 +648,100 @@ createWorkgroup(Module &M, Function *F)
     }
 
     arguments.push_back(value);
-    ++i;
+    ++ii;
   }
 
-  arguments.back() = ++ai;
+  Value *ptr, *v;
+  int size_t_width = 32;
+#if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+  if (M.getPointerSize() == llvm::Module::Pointer64)
+#elif (defined LLVM_OLDER_THAN_3_7)
+  if (M.getDataLayout()->getPointerSize(0) == 8)
+#else
+  if (M.getDataLayout().getPointerSize(0) == 8)
+#endif
+    size_t_width = 64;
+
+  if(Workgroup::shouldExpandStruct(*F)) {
+    ai++;
+#if defined LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::WORK_DIM);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                  TypeBuilder<PoclContext, true>::WORK_DIM);
+#endif
+    v = builder.CreateLoad(builder.CreateConstGEP1_32(ptr, 0));
+    arguments.push_back(v);
+#ifdef LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::NUM_GROUPS);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::NUM_GROUPS);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+          v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else 
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+#if defined LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::GROUP_ID);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::GROUP_ID);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+        v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+#ifdef LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+        v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+  } else {
+    arguments.back() = ++ai;
+  }
   
   builder.CreateCall(F, ArrayRef<Value*>(arguments));
   builder.CreateRetVoid();
@@ -601,9 +765,19 @@ createWorkgroupFast(Module &M, Function *F)
 {
   IRBuilder<> builder(M.getContext());
 
+  /*
+  Type *params[] = {
+    Type::getInt8Ty(M.getContext())->getPointerTo()->getPointerTo(),
+    Type::getInt32Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+    Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext()),
+  };
+  */
   FunctionType *ft =
     TypeBuilder<void(types::i<8>*[],
-		     PoclContext*), true>::get(M.getContext());
+                     PoclContext*), true>::get(M.getContext());
+    //FunctionType::get(Type::getVoidTy(M.getContext()), params, true);
 
   std::string funcName = "";
   funcName = F->getName().str();
@@ -623,8 +797,9 @@ createWorkgroupFast(Module &M, Function *F)
 
   SmallVector<Value*, 8> arguments;
   int i = 0;
-  for (Function::const_arg_iterator ii = F->arg_begin(), ee = F->arg_end();
-       ii != ee; ++i, ++ii) {
+  Function::const_arg_iterator ii = F->arg_begin();
+       //ii != ee; ++ii) {
+  for (i = 0; i < F->arg_size()-(1+3*3); i++) {
     Type *t = ii->getType();
     Value *gep = builder.CreateGEP(ai, 
             ConstantInt::get(IntegerType::get(M.getContext(), 32), i));
@@ -638,6 +813,7 @@ createWorkgroupFast(Module &M, Function *F)
 #else
         arguments.push_back(builder.CreatePointerCast(pointer, t));
 #endif
+        ++ii;
         continue;
       }
 
@@ -669,9 +845,100 @@ createWorkgroupFast(Module &M, Function *F)
     }
     
     arguments.push_back(value);
+    ++ii;
   }
 
-  arguments.back() = ++ai;
+  Value *ptr, *v;
+  int size_t_width = 32;
+#if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+  if (M.getPointerSize() == llvm::Module::Pointer64)
+#elif (defined LLVM_OLDER_THAN_3_7)
+  if (M.getDataLayout()->getPointerSize(0) == 8)
+#else
+  if (M.getDataLayout().getPointerSize(0) == 8)
+#endif
+    size_t_width = 64;
+
+  if(Workgroup::shouldExpandStruct(*F)) {
+    ai++;
+#if defined LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::WORK_DIM);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                  TypeBuilder<PoclContext, true>::WORK_DIM);
+#endif
+    v = builder.CreateLoad(builder.CreateConstGEP1_32(ptr, 0));
+    arguments.push_back(v);
+#ifdef LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::NUM_GROUPS);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::NUM_GROUPS);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+          v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else 
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+#if defined LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				  TypeBuilder<PoclContext, true>::GROUP_ID);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::GROUP_ID);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+        v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+#ifdef LLVM_OLDER_THAN_3_7
+    ptr = builder.CreateStructGEP(ai,
+				TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#else
+    ptr = builder.CreateStructGEP(ai->getType()->getPointerElementType(), ai,
+                                TypeBuilder<PoclContext, true>::GLOBAL_OFFSET);
+#endif
+    for (int i = 0; i < 3; ++i) {
+      if (size_t_width == 64)
+      {
+        v = builder.CreateLoad(builder.CreateConstGEP2_64(ptr, 0, i));
+      }
+      else
+      {
+#ifdef LLVM_OLDER_THAN_3_7
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr, 0, i));
+#else
+        v = builder.CreateLoad(builder.CreateConstGEP2_32(ptr->getType()->getPointerElementType(), ptr, 0, i));
+#endif
+      }
+      arguments.push_back(v);
+    }
+  } else {
+    arguments.back() = ++ai;
+  }
   
   builder.CreateCall(F, ArrayRef<Value*>(arguments));
   builder.CreateRetVoid();
@@ -708,6 +975,12 @@ Workgroup::isKernelToProcess(const Function &F)
         dyn_cast<ValueAsMetadata>(kernels->getOperand(i)->getOperand(0))
           ->getValue());
 #endif
+    SmallVector<StringRef, 8>::const_iterator pi = processed_kernels.begin();
+    SmallVector<StringRef, 8>::const_iterator pe = processed_kernels.end();
+    for( ; pi != pe; ++pi) {
+      if(k->getName() == *pi) 
+        return false;
+    }
     if (&F == k)
       return true;
   }

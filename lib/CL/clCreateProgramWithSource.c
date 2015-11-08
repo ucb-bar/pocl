@@ -108,6 +108,8 @@ POname(clCreateProgramWithSource)(cl_context context,
        calloc (program->num_devices, sizeof(char*))) == NULL ||
       ((program->llvm_irs =
         (void**) calloc (program->num_devices, sizeof(void*))) == NULL) ||
+      ((program->target_llvm_irs =
+        (void**) calloc (program->num_devices, sizeof(void*))) == NULL) ||
       ((program->build_hash = (SHA1_digest_t*)
         calloc (program->num_devices, sizeof(SHA1_digest_t))) == NULL))
     {
@@ -126,6 +128,7 @@ ERROR:
   if (program) {
     POCL_MEM_FREE(program->build_hash);
     POCL_MEM_FREE(program->llvm_irs);
+    POCL_MEM_FREE(program->target_llvm_irs);
     POCL_MEM_FREE(program->build_log);
     POCL_MEM_FREE(program->binaries);
     POCL_MEM_FREE(program->binary_sizes);

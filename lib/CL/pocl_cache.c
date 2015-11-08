@@ -277,15 +277,16 @@ static int make_kernel_cachedir_path(char*        kernel_cachedir_path,
     return pocl_mkdir_p(kernel_cachedir_path);
 }
 
-
-int pocl_cache_write_kernel_parallel_bc(void*        bc,
+int pocl_cache_write_kernel_parallel_bc(void*        host_bc,
+                                        void*        target_bc,
                                         cl_program   program,
                                         unsigned     device_i,
                                         cl_kernel    kernel,
                                         size_t       local_x,
                                         size_t       local_y,
                                         size_t       local_z) {
-    assert(bc);
+    assert(host_bc);
+    assert(target_bc);
 
     char kernel_parallel_path[POCL_FILENAME_LENGTH];
     char target_kernel_parallel_path[POCL_FILENAME_LENGTH];
@@ -303,9 +304,9 @@ int pocl_cache_write_kernel_parallel_bc(void*        bc,
     strcat(target_kernel_parallel_path, "/target_");
     strcat(target_kernel_parallel_path, POCL_PARALLEL_BC_FILENAME);
     printf("write target module:%s\n",target_kernel_parallel_path);fflush(stdout);
-    pocl_write_module(bc, target_kernel_parallel_path, 0); //COLIN FIXME
+    pocl_write_module(target_bc, target_kernel_parallel_path, 0); //COLIN FIXME
     printf("write host module:%s\n",kernel_parallel_path);fflush(stdout);
-    return pocl_write_module(bc, kernel_parallel_path, 0);
+    return pocl_write_module(host_bc, kernel_parallel_path, 0);
 }
 
 int pocl_cache_make_kernel_cachedir_path(char*        kernel_cachedir_path,

@@ -89,6 +89,7 @@ POname(clEnqueueReadBuffer)(cl_command_queue command_queue,
           for(i = 0; i < cb; i++) {
             char byte_text[6];
             snprintf(byte_text,6,"%3u,\n",((uint8_t*)cmd->command.read.host_ptr)[i]);
+            //printf("Writing byte_text:%s\n",byte_text);
             pocl_write_file(input_file, byte_text, 5, 1, 1);
           }
 

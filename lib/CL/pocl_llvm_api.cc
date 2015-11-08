@@ -567,7 +567,7 @@ int pocl_llvm_build_program(cl_program program,
   if (!success) return CL_BUILD_PROGRAM_FAILURE;
 
   //TODO COLIN: we only save the host in progrm->* we should have a host and target device, but thats way more work
-  llvm::Module **target_mod = (llvm::Module **)&program->llvm_irs[device_i];
+  llvm::Module **target_mod = (llvm::Module **)&program->target_llvm_irs[device_i];
   llvm::Module **host_mod = (llvm::Module **)&program->llvm_irs[device_i];
   if (*host_mod != NULL)
     delete (llvm::Module*)*host_mod;
@@ -596,6 +596,11 @@ int pocl_llvm_build_program(cl_program program,
   llvm::raw_string_ostream sos(content);
   WriteBitcodeToFile(*host_mod, sos);
   sos.str(); // flush
+
+  std::string target_content;
+  llvm::raw_string_ostream target_sos(target_content);
+  WriteBitcodeToFile(*target_mod, target_sos);
+  target_sos.str(); // flush
 
   if (program->binaries[device_i])
     POCL_MEM_FREE(program->binaries[device_i]);
@@ -1209,7 +1214,7 @@ static PassManager& target_kernel_compiler_passes
      restore code (PHIs need to be at the beginning of the BB and so one cannot
      context restore them with non-PHI code if the value is needed in another PHI). */
 
-  printf("building passes list\n");fflush(stdout);fflush(stderr);
+  printf("building target passes list\n");fflush(stdout);fflush(stderr);
   std::vector<std::string> passes;
   passes.push_back("workitem-handler-chooser");
   passes.push_back("mem2reg");
@@ -1219,8 +1224,10 @@ static PassManager& target_kernel_compiler_passes
 	  passes.push_back("automatic-locals");
   passes.push_back("flatten");
   passes.push_back("always-inline");
+  passes.push_back("print-module");
   passes.push_back("globaldce");
-  if (!SPMDDevice) {
+  passes.push_back("print-module");
+  /*if (!SPMDDevice) {
       passes.push_back("simplifycfg");
       passes.push_back("loop-simplify");
       passes.push_back("uniformity");
@@ -1237,14 +1244,18 @@ static PassManager& target_kernel_compiler_passes
       //passes.push_back("print-module");
       passes.push_back("workitemloops");
       passes.push_back("workgroup");
-  }
+  }*/
+  passes.push_back("workitemspmd");
+  passes.push_back("workgroup");
+  passes.push_back("mem2reg");
+  passes.push_back("globaldce");
   passes.push_back("allocastoentry");
   passes.push_back("target-address-spaces");
   // Later passes might get confused (and expose possible bugs in them) due to
   // UNREACHABLE blocks left by repl. So let's clean up the CFG before running the
   // standard LLVM optimizations.
   passes.push_back("simplifycfg");
-  //passes.push_back("print-module");
+  passes.push_back("print-module");
 
   const std::string wg_method = 
     pocl_get_string_option("POCL_WORK_GROUP_METHOD", "loopvec");
@@ -1314,9 +1325,9 @@ static PassManager& target_kernel_compiler_passes
     } 
 #endif
 
-  passes.push_back("instcombine");
-  passes.push_back("STANDARD_OPTS");
-  passes.push_back("instcombine");
+  //passes.push_back("instcombine");
+  //passes.push_back("STANDARD_OPTS");
+  //passes.push_back("instcombine");
 
   // Now actually add the listed passes to the PassManager.
   for(unsigned i = 0; i < passes.size(); ++i)
@@ -1510,7 +1521,7 @@ static PassManager& host_kernel_compiler_passes
   passes.push_back("print-module");
   passes.push_back("globaldce");
   passes.push_back("print-module");
-  if (!SPMDDevice) {
+  /*if (!SPMDDevice) {
       passes.push_back("simplifycfg");
       passes.push_back("loop-simplify");
       passes.push_back("uniformity");
@@ -1527,7 +1538,10 @@ static PassManager& host_kernel_compiler_passes
       //passes.push_back("print-module");
       passes.push_back("workitemloops");
       passes.push_back("workgroup");
-  }
+  }*/
+  passes.push_back("workitemspmd");
+  passes.push_back("workgroup");
+  passes.push_back("mem2reg");
   passes.push_back("globaldce");
   passes.push_back("allocastoentry");
   passes.push_back("target-address-spaces");
@@ -1684,14 +1698,12 @@ namespace pocl {
  */
 static llvm::Module*
 kernel_library
-(cl_device_id device)
+(cl_device_id device, Triple triple)
 {
   llvm::MutexGuard lockHolder(kernelCompilerLock);
   InitializeLLVM();
 
   static std::map<cl_device_id, llvm::Module*> libs;
-
-  Triple triple(device->llvm_target_triplet);
 
   printf("libs find\n");fflush(stdout);
   if (libs.find(device) != libs.end())
@@ -1754,6 +1766,22 @@ kernel_library
   return lib;
 }
 
+static llvm::Module*
+target_kernel_library
+(cl_device_id device)
+{
+  Triple triple(device->llvm_target_triplet);
+  return kernel_library(device, triple);
+}
+
+static llvm::Module*
+host_kernel_library
+(cl_device_id device)
+{
+  Triple triple(device->llvm_host_triplet);
+  return kernel_library(device, triple);
+}
+
 /* This is used to control the kernel we want to process in the kernel compilation. */
 extern cl::opt<std::string> KernelName;
 
@@ -1789,7 +1817,8 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
   std::string errmsg;
 
   // Link the kernel and runtime library
-  llvm::Module *input = NULL;
+  llvm::Module *host_input = NULL;
+  llvm::Module *target_input = NULL;
   if (kernel->program->llvm_irs != NULL && 
       kernel->program->llvm_irs[device_i] != NULL)
     {
@@ -1797,10 +1826,12 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
       printf("### cloning the preloaded LLVM IR\n");
 #endif
   printf("clone module\n");fflush(stdout);
-      input = 
+      host_input = 
         llvm::CloneModule
         ((llvm::Module*)kernel->program->llvm_irs[device_i]);
-      input->dump();
+      target_input = 
+        llvm::CloneModule
+        ((llvm::Module*)kernel->program->target_llvm_irs[device_i]);
     }
   else
     {
@@ -1811,19 +1842,22 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
       char host_program_bc_path[POCL_FILENAME_LENGTH];
   printf("cache bc path\n");fflush(stdout);
 //TODO COLIN: fix this section of code to have host and target bc
-      pocl_cache_program_bc_path(target_program_bc_path, program, device_i, "/host");
+      pocl_cache_program_bc_path(target_program_bc_path, program, device_i, "/target");
       pocl_cache_program_bc_path(host_program_bc_path, program, device_i, "/host");
   printf("parse host ir file:%s,target:%s\n",host_program_bc_path, target_program_bc_path);fflush(stdout);
-      input = ParseIRFile(host_program_bc_path, Err, *GlobalContext());
+      host_input = ParseIRFile(host_program_bc_path, Err, *GlobalContext());
+      target_input = ParseIRFile(target_program_bc_path, Err, *GlobalContext());
     }
 
   // Later this should be replaced with indexed linking of source code
   // and/or bitcode for each kernel.
   printf("kernel_library\n");fflush(stdout);
-  llvm::Module *libmodule = kernel_library(device);
-  assert (libmodule != NULL);
+  llvm::Module *host_libmodule = host_kernel_library(device);
+  llvm::Module *target_libmodule = target_kernel_library(device);
+  assert (host_libmodule != NULL);
   printf("link\n");fflush(stdout);
-  link(input, libmodule);
+  link(host_input, host_libmodule);
+  link(target_input, target_libmodule);
 
   /* Now finally run the set of passes assembled above */
   // TODO pass these as parameters instead, this is not thread safe!
@@ -1834,25 +1868,28 @@ int pocl_llvm_generate_workgroup_function(cl_device_id device, cl_kernel kernel,
 
   printf("kernel compiler passes\n");fflush(stdout);fflush(stderr);
 #if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
-  host_kernel_compiler_passes(device, input->getDataLayout()).run(*input);
+  host_kernel_compiler_passes(device, host_input->getDataLayout()).run(*host_input);
 #elif (defined LLVM_OLDER_THAN_3_7)
   host_kernel_compiler_passes(
       device,
-      input->getDataLayout()->getStringRepresentation()).run(*input);
+      host_input->getDataLayout()->getStringRepresentation()).run(*host_input);
 #else
   host_kernel_compiler_passes(
       device,
-      input->getDataLayout().getStringRepresentation())
-      .run(*input);
-  /*target_kernel_compiler_passes(
+      host_input->getDataLayout().getStringRepresentation())
+      .run(*host_input);
+  target_kernel_compiler_passes(
       device,
-      input->getDataLayout().getStringRepresentation())
-      .run(*input);*/
+      target_input->getDataLayout().getStringRepresentation())
+      .run(*target_input);
 #endif
   printf("cache write kernel parallel bc\n");fflush(stdout);fflush(stderr);
-  input->dump();
+    host_input->dump();
+  printf("dumped host\n");fflush(stdout);fflush(stderr);
+    target_input->dump();
+  printf("dumped target\n");fflush(stdout);fflush(stderr);
   // TODO: don't write this once LLC is called via API, not system()
-  pocl_cache_write_kernel_parallel_bc(input, program, device_i, kernel,
+  pocl_cache_write_kernel_parallel_bc(host_input, target_input, program, device_i, kernel,
                                   local_x, local_y, local_z);
 
   return 0;
@@ -1865,14 +1902,20 @@ pocl_update_program_llvm_irs(cl_program program,
 {
   SMDiagnostic Err;
 
-  char program_bc_path[POCL_FILENAME_LENGTH];
-  pocl_cache_program_bc_path(program_bc_path, program, device_i, "/host");
+  char host_program_bc_path[POCL_FILENAME_LENGTH];
+  char target_program_bc_path[POCL_FILENAME_LENGTH];
+  pocl_cache_program_bc_path(host_program_bc_path, program, device_i, "/host");
+  pocl_cache_program_bc_path(target_program_bc_path, program, device_i, "/target");
 
-  if (!pocl_exists(program_bc_path))
+  if (!pocl_exists(host_program_bc_path))
+    return -1;
+  if (!pocl_exists(target_program_bc_path))
     return -1;
 
   program->llvm_irs[device_i] =
-              ParseIRFile(program_bc_path, Err, *GlobalContext());
+              ParseIRFile(host_program_bc_path, Err, *GlobalContext());
+  program->target_llvm_irs[device_i] =
+              ParseIRFile(target_program_bc_path, Err, *GlobalContext());
   return 0;
 }
 
@@ -1883,13 +1926,19 @@ void pocl_free_llvm_irs(cl_program program, int device_i)
         delete mod;
         program->llvm_irs[device_i] = NULL;
     }
+    if (program->target_llvm_irs[device_i]) {
+        llvm::Module *mod = (llvm::Module *)program->target_llvm_irs[device_i];
+        delete mod;
+        program->target_llvm_irs[device_i] = NULL;
+    }
 }
 
 void pocl_llvm_update_binaries (cl_program program) {
 
   llvm::MutexGuard lockHolder(kernelCompilerLock);
   InitializeLLVM();
-  char program_bc_path[POCL_FILENAME_LENGTH];
+  char host_program_bc_path[POCL_FILENAME_LENGTH];
+  char target_program_bc_path[POCL_FILENAME_LENGTH];
   void* cache_lock = NULL;
 
   // Dump the LLVM IR Modules to memory buffers. 
@@ -1906,13 +1955,20 @@ void pocl_llvm_update_binaries (cl_program program) {
 
       cache_lock = pocl_cache_acquire_writer_lock_i(program, i);
 
-      pocl_cache_program_bc_path(program_bc_path, program, i, "/host");
-      pocl_write_module((llvm::Module*)program->llvm_irs[i], program_bc_path, 1);
+      pocl_cache_program_bc_path(host_program_bc_path, program, i, "/host");
+      pocl_write_module((llvm::Module*)program->llvm_irs[i], host_program_bc_path, 1);
+      pocl_cache_program_bc_path(target_program_bc_path, program, i, "/target");
+      pocl_write_module((llvm::Module*)program->target_llvm_irs[i], target_program_bc_path, 1);
 
       std::string content;
       llvm::raw_string_ostream sos(content);
       WriteBitcodeToFile((llvm::Module*)program->llvm_irs[i], sos);
       sos.str(); // flush
+
+      std::string target_content;
+      llvm::raw_string_ostream target_sos(target_content);
+      WriteBitcodeToFile((llvm::Module*)program->target_llvm_irs[i], target_sos);
+      target_sos.str(); // flush
 
       size_t n = content.size();
       if (n < program->binary_sizes[i])

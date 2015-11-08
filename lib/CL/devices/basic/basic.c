@@ -689,6 +689,8 @@ pocl_basic_run
   pocl_write_file(glue_file, include, include_size, 0, 0);
   include_size = snprintf(include, 100, "#include <stdio.h>\n");
   pocl_write_file(glue_file, include, include_size, 1, 1);
+  include_size = snprintf(include, 100, "#include <stdint.h>\n");
+  pocl_write_file(glue_file, include, include_size, 1, 1);
   for(i = 0; i < kernel->num_args; i++) {
     include_size = snprintf(include, 100, "#include \"input_%s.h\"\n", kernel->arg_info[i].name);
     pocl_write_file(glue_file, include, include_size, 1, 1);

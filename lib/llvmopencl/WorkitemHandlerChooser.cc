@@ -25,6 +25,7 @@
 
 #include "WorkitemHandlerChooser.h"
 #include "WorkitemLoops.h"
+#include "WorkitemSPMD.h"
 #include "WorkitemReplication.h"
 #include "Workgroup.h"
 #include "CanonicalizeBarriers.h"
@@ -78,7 +79,9 @@ WorkitemHandlerChooser::runOnFunction(Function &F)
   if (getenv("POCL_WORK_GROUP_METHOD") != NULL)
     {
       method = getenv("POCL_WORK_GROUP_METHOD");
-      if (method == "repl" || method == "workitemrepl")
+      if (method == "spmd")
+        chosenHandler_ = POCL_WIH_SPMD;
+      else if (method == "repl" || method == "workitemrepl")
         chosenHandler_ = POCL_WIH_FULL_REPLICATION;
       else if (method == "loops" || method == "workitemloops" || method == "loopvec")
         chosenHandler_ = POCL_WIH_LOOPS;

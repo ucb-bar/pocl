@@ -94,7 +94,8 @@ int pocl_cache_make_kernel_cachedir_path(char*        kernel_cachedir_path,
 
 
 
-int pocl_cache_write_kernel_parallel_bc(void*        bc,
+int pocl_cache_write_kernel_parallel_bc(void*        host_bc,
+                                        void*        target_bc,
                                         cl_program   program,
                                         unsigned     device_i,
                                         cl_kernel    kernel,

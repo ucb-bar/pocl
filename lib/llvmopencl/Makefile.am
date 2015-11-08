@@ -51,6 +51,7 @@ PASSES_SOURCES = Barrier.h						\
 						WorkItemAliasAnalysis.cc \
 						WorkitemHandler.h WorkitemHandler.cc \
 						WorkitemLoops.h WorkitemLoops.cc \
+						WorkitemSPMD.h WorkitemSPMD.cc \
 						PHIsToAllocas.h PHIsToAllocas.cc \
 						BreakConstantGEPs.h BreakConstantGEPs.cpp \
 						WorkitemHandlerChooser.h WorkitemHandlerChooser.cc \

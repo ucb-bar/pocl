@@ -183,6 +183,7 @@ pocl_memalign_alloc(size_t align_width, size_t size)
 
 #ifndef POCL_ANDROID
   status = posix_memalign(&ptr, align_width, size);
+  memset(ptr, 0, size);
   return ((status == 0)? ptr: (void*)NULL);
 #else
   ptr = memalign(align_width, size);

@@ -1,4 +1,4 @@
-// Header for WorkitemHandlerChooser function pass.
+// Header for WorkitemSPMD function pass.
 // 
 // Copyright (c) 2012 Pekka Jääskeläinen / TUT
 // 
@@ -20,33 +20,64 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef _POCL_WORKITEM_HANDLER_CHOOSER_H
-#define _POCL_WORKITEM_HANDLER_CHOOSER_H
+#ifndef _POCL_WORKITEM_SPMD_H
+#define _POCL_WORKITEM_SPMD_H
 
+#include "pocl.h"
+
+#if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+#include "llvm/Analysis/Dominators.h"
+#endif
+
+#include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
+#include <map>
+#include <vector>
 #include "WorkitemHandler.h"
+#include "ParallelRegion.h"
+
+namespace llvm {
+  struct PostDominatorTree;
+}
 
 namespace pocl {
   class Workgroup;
 
-  class WorkitemHandlerChooser : public pocl::WorkitemHandler {
+  class WorkitemSPMD : public pocl::WorkitemHandler {
+
   public:
     static char ID;
-    
-    enum WorkitemHandlerType {
-      POCL_WIH_FULL_REPLICATION,
-      POCL_WIH_LOOPS,
-      POCL_WIH_SPMD
-    };
 
-  WorkitemHandlerChooser() : pocl::WorkitemHandler(ID), 
-      chosenHandler_(POCL_WIH_LOOPS) {}
+  WorkitemSPMD() : pocl::WorkitemHandler(ID) {}
 
     virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const;
     virtual bool runOnFunction(llvm::Function &F);
-    
-    WorkitemHandlerType chosenHandler() { return chosenHandler_; }
+
   private:
-    WorkitemHandlerType chosenHandler_;
+
+    typedef std::vector<llvm::BasicBlock *> BasicBlockVector;
+    typedef std::set<llvm::Instruction* > InstructionIndex;
+    typedef std::vector<llvm::Instruction* > InstructionVec;
+    typedef std::map<std::string, llvm::Instruction*> StrInstructionMap;
+
+    llvm::DominatorTree *DT;
+#ifdef LLVM_OLDER_THAN_3_7
+    llvm::LoopInfo *LI;
+#else
+    llvm::LoopInfoWrapperPass *LI;
+#endif
+    llvm::PostDominatorTree *PDT;
+#if ! (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
+    llvm::DominatorTreeWrapperPass *DTP;
+#endif
+
+    ParallelRegion::ParallelRegionVector *original_parallel_regions;
+
+    StrInstructionMap contextArrays;
+
+    virtual bool ProcessFunction(llvm::Function &F);
+
   };
 }
 

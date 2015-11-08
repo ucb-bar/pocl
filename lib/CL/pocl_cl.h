@@ -490,6 +490,7 @@ struct _cl_program {
   char** build_log;
   /* Used to store the llvm IR of the build to save disk I/O. */
   void **llvm_irs;
+  void **target_llvm_irs;
   /* Use to store build status */
   cl_build_status build_status;
 };
