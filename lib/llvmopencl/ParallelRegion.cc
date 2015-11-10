@@ -308,19 +308,30 @@ ParallelRegion::insertLocalIdInit(llvm::BasicBlock* entry,
 #endif
     size_t_width = 64;
 
-  GlobalVariable *gvx = M->getGlobalVariable(POCL_LOCAL_ID_X_GLOBAL);
-  if (gvx != NULL)
+  StringRef pocl_local_id_x_global = StringRef(POCL_LOCAL_ID_X_GLOBAL);
+  StringRef pocl_local_id_y_global = StringRef(POCL_LOCAL_ID_Y_GLOBAL);
+  StringRef pocl_local_id_z_global = StringRef(POCL_LOCAL_ID_Z_GLOBAL);
+  if(M->getTargetTriple().find("riscv") != string::npos) {
+    pocl_local_id_x_global = StringRef("_local_base_id_x");
+    pocl_local_id_y_global = StringRef("_local_base_id_y");
+    pocl_local_id_z_global = StringRef("_local_base_id_z");
+  }
+
+
+  GlobalVariable *gvx = M->getGlobalVariable(pocl_local_id_x_global);
+  if (gvx != NULL) {
       builder.CreateStore(ConstantInt::get(IntegerType::
                                            get(M->getContext(), size_t_width), 
                                            x), gvx);
+  }
 
-  GlobalVariable *gvy = M->getGlobalVariable(POCL_LOCAL_ID_Y_GLOBAL);
+  GlobalVariable *gvy = M->getGlobalVariable(pocl_local_id_y_global);
   if (gvy != NULL)
     builder.CreateStore(ConstantInt::get(IntegerType::
                                          get(M->getContext(), size_t_width),
                                          y), gvy);
 
-  GlobalVariable *gvz = M->getGlobalVariable(POCL_LOCAL_ID_Z_GLOBAL);
+  GlobalVariable *gvz = M->getGlobalVariable(pocl_local_id_z_global);
   if (gvz != NULL)
     builder.CreateStore(ConstantInt::get(IntegerType::
                                          get(M->getContext(), size_t_width),

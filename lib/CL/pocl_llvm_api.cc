@@ -1521,7 +1521,7 @@ static PassManager& host_kernel_compiler_passes
   passes.push_back("print-module");
   passes.push_back("globaldce");
   passes.push_back("print-module");
-  /*if (!SPMDDevice) {
+  //if (!SPMDDevice) {
       passes.push_back("simplifycfg");
       passes.push_back("loop-simplify");
       passes.push_back("uniformity");
@@ -1538,11 +1538,9 @@ static PassManager& host_kernel_compiler_passes
       //passes.push_back("print-module");
       passes.push_back("workitemloops");
       passes.push_back("workgroup");
-  }*/
-  passes.push_back("workitemspmd");
-  passes.push_back("workgroup");
-  passes.push_back("mem2reg");
-  passes.push_back("globaldce");
+  //}
+  //passes.push_back("mem2reg");
+  //passes.push_back("globaldce");
   passes.push_back("allocastoentry");
   passes.push_back("target-address-spaces");
   // Later passes might get confused (and expose possible bugs in them) due to
@@ -1619,11 +1617,9 @@ static PassManager& host_kernel_compiler_passes
     } 
 #endif
 
-/*
   passes.push_back("instcombine");
   passes.push_back("STANDARD_OPTS");
   passes.push_back("instcombine");
-*/
 
   // Now actually add the listed passes to the PassManager.
   for(unsigned i = 0; i < passes.size(); ++i)
@@ -1706,11 +1702,14 @@ kernel_library
   static std::map<cl_device_id, llvm::Module*> libs;
 
   printf("libs find\n");fflush(stdout);
+  // colins FIXME: renable cache by adding triple to map input
+  /*
   if (libs.find(device) != libs.end())
     {
       return libs[device];
     }
 
+    */
   // TODO sync with Nat Ferrus' indexed linking
   std::string kernellib;
   if (pocl_get_bool_option("POCL_BUILDING", 0))
@@ -1743,7 +1742,7 @@ kernel_library
           kernellib += "host";
         }
       kernellib += "/kernel-"; 
-      kernellib += device->llvm_target_triplet;
+      kernellib += triple.getTriple();
       kernellib +=".bc";   
     }
   else
@@ -1751,7 +1750,7 @@ kernel_library
   printf("kernelib name\n");fflush(stdout);
       kernellib = PKGDATADIR;
       kernellib += "/kernel-";
-      kernellib += device->llvm_target_triplet;
+      kernellib += triple.getTriple();
       kernellib += ".bc";
     }
 

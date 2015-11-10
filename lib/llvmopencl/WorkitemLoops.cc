@@ -118,9 +118,11 @@ WorkitemLoops::runOnFunction(Function &F)
   if (!Workgroup::isKernelToProcess(F))
     return false;
 
+  /*
   if (getAnalysis<pocl::WorkitemHandlerChooser>().chosenHandler() != 
       pocl::WorkitemHandlerChooser::POCL_WIH_LOOPS)
     return false;
+    */
 
   #if (defined LLVM_3_2 || defined LLVM_3_3 || defined LLVM_3_4)
   DT = &getAnalysis<DominatorTree>();

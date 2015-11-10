@@ -48,7 +48,7 @@ namespace pocl {
     static bool isKernelToProcess(const llvm::Function &F);
     static bool hasWorkgroupBarriers(const llvm::Function &F);
     static bool shouldExpandStruct(const llvm::Function &F) {
-      return true;
+      return (F.getParent()->getTargetTriple().find("riscv") != std::string::npos);
     }
 
   };

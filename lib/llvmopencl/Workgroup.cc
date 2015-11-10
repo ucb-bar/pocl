@@ -462,7 +462,10 @@ privatizeContext(Module &M, Function *F)
 
   // Privatize _local_id  
   for (int i = 0; i < 3; ++i) {
-    snprintf(s, STRING_LENGTH, "_local_id_%c", 'x' + i);
+    if(M.getTargetTriple().find("riscv") != string::npos)
+      snprintf(s, STRING_LENGTH, "_local_base_id_%c", 'x' + i);
+    else 
+      snprintf(s, STRING_LENGTH, "_local_id_%c", 'x' + i);
     gv[i] = M.getGlobalVariable(s);
     if (gv[i] != NULL) {
       ai[i] = builder.CreateAlloca(gv[i]->getType()->getElementType(),
@@ -621,8 +624,12 @@ createWorkgroup(Module &M, Function *F)
   SmallVector<Value*, 8> arguments;
   int i = 0;
   Function::const_arg_iterator ii = F->arg_begin();
-       //ii != ee; ++ii) {
-  for (i = 0; i < F->arg_size()-(1+3*3); i++) {
+  int endVal = 0;
+  if(Workgroup::shouldExpandStruct(*F)) 
+    endVal = F->arg_size()-(1+3*3);
+  else
+    endVal = F->arg_size();
+  for (i = 0; i < endVal; i++) {
     Type *t = ii->getType();
 
     Value *gep = builder.CreateGEP(ai,
@@ -798,8 +805,12 @@ createWorkgroupFast(Module &M, Function *F)
   SmallVector<Value*, 8> arguments;
   int i = 0;
   Function::const_arg_iterator ii = F->arg_begin();
-       //ii != ee; ++ii) {
-  for (i = 0; i < F->arg_size()-(1+3*3); i++) {
+  int endVal = 0;
+  if(Workgroup::shouldExpandStruct(*F)) 
+    endVal = F->arg_size()-(1+3*3);
+  else
+    endVal = F->arg_size();
+  for (i = 0; i < endVal; i++) {
     Type *t = ii->getType();
     Value *gep = builder.CreateGEP(ai, 
             ConstantInt::get(IntegerType::get(M.getContext(), 32), i));

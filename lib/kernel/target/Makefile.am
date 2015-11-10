@@ -32,8 +32,8 @@ LD_FLAGS    = @TARGET_LD_FLAGS@
 
 include ../rules.mk
 include ../sources.mk
-if USE_VECMATHLIB
-include ../sources-vml.mk
-endif
+
+LKERNEL_SRCS_EXCLUDE = get_local_id.c 
+LKERNEL_SRCS_EXTRA = get_local_id.ll 
 
 EXTRA_DIST = CMakeLists.txt
