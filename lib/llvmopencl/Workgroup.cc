@@ -291,6 +291,8 @@ createLauncher(Module &M, Function *F)
   llvm::NamedMDNode *nmd = M.getNamedMetadata("opencl.kernels");
   for (unsigned i = 0, e = nmd->getNumOperands(); i != e; ++i) {
     llvm::MDNode *kernel_iter = nmd->getOperand(i);
+    if(!kernel_iter->getOperand(0))
+      continue; // other kernels in the module may be removed
     llvm::Function *k = 
       cast<Function>(
         dyn_cast<llvm::ValueAsMetadata>(kernel_iter->getOperand(0))->getValue());
@@ -992,7 +994,8 @@ Workgroup::isKernelToProcess(const Function &F)
       if(k->getName() == *pi) 
         return false;
     }
-    if (&F == k)
+    if ((KernelName == k->getName() || k->getName() == "") &&
+        &F == k )
       return true;
   }
 

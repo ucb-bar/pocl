@@ -31,7 +31,9 @@ pocl_topology_detect_device_info(cl_device_id device)
 {
   hwloc_topology_t pocl_topology;
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_init\n");
+#endif
   int ret = hwloc_topology_init(&pocl_topology);
   if (ret == -1)
     POCL_ABORT("Cannot initialize the topology.\n");
@@ -39,25 +41,37 @@ pocl_topology_detect_device_info(cl_device_id device)
   /* we also want to get the IO bridge, to extract the device vendor id,
    * if possible
    */
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_set_flags\n");
+#endif
   hwloc_topology_set_flags(pocl_topology, HWLOC_TOPOLOGY_FLAG_WHOLE_IO);
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_set_synth\n");
+#endif
   ret = hwloc_topology_set_synthetic(pocl_topology, "node:1 pack:1 cache:1 core:1 pu:1");
   if(ret == -1)
     POCL_ABORT("Cannot set synth topology.");
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_load\n");
+#endif
   ret = hwloc_topology_load(pocl_topology);
   if (ret == -1)
     POCL_ABORT("Cannot load the topology.\n");
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_get_mem\n");
+#endif
   device->global_mem_size = hwloc_get_root_obj(pocl_topology)->memory.total_memory;
 
   // Try to get the number of CPU cores from topology
+#ifdef DEBUG_POCL_LLVM_API
   printf("before hwloc_get_depth\n");
+#endif
   int depth = hwloc_get_type_depth(pocl_topology, HWLOC_OBJ_PU);
   if(depth != HWLOC_TYPE_DEPTH_UNKNOWN){
+#ifdef DEBUG_POCL_LLVM_API
     printf("before hwloc_get_compute_unit\n");
+#endif
     device->max_compute_units = hwloc_get_nbobjs_by_depth(pocl_topology, depth);
   }
 

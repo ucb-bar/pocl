@@ -107,7 +107,9 @@ llvm_codegen (const char* tmpdir, cl_kernel kernel, cl_device_id device) {
       POCL_MSG_PRINT_INFO ("executing [%s]\n", command);
       printf("executing [%s]\n", command);
       error = system (command);
-      assert (error == 0);
+#ifndef CROSS_COMPILE_EXTRACTOR
+      //assert (error == 0);
+#endif
 
       /* Save space in kernel cache */
       if (!pocl_get_bool_option("POCL_LEAVE_KERNEL_COMPILER_TEMP_FILES", 0))

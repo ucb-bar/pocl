@@ -97,6 +97,15 @@ AS_IF([test "x$target" != "x$host"], [
   LLVM_BINDIR_HOST=`$LLVM_CONFIG --bindir`
   LLVM_LIBDIR_HOST=`$LLVM_CONFIG_HOST --libdir`
   LLVM_LDFLAGS_HOST=`$LLVM_CONFIG_HOST --ldflags`
+], [test "x$build" != "x$host"], [
+  LLVM_VERSION=`$LLVM_CONFIG_HOST --version`
+  LLVM_BINDIR=`$LLVM_CONFIG_HOST --bindir`
+  LLVM_LIBDIR=`$LLVM_CONFIG_HOST --libdir`
+  LLVM_LDFLAGS=`$LLVM_CONFIG_HOST --ldflags`
+  LLVM_VERSION_HOST=`$LLVM_CONFIG_HOST --version`
+  LLVM_BINDIR_HOST=`$LLVM_CONFIG --bindir`
+  LLVM_LIBDIR_HOST=`$LLVM_CONFIG_HOST --libdir`
+  LLVM_LDFLAGS_HOST=`$LLVM_CONFIG_HOST --ldflags`
 ], [
   LLVM_VERSION=`$LLVM_CONFIG --version`
   LLVM_BINDIR=`$LLVM_CONFIG --bindir`
@@ -127,6 +136,8 @@ case "$LLVM_VERSION" in
      AC_DEFINE([LLVM_3_5], [], "Using LLVM 3.5")
      AS_IF([test "x$target" != "x$host"], [
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[test "x$build" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
      ],[
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
      ])
@@ -136,6 +147,8 @@ case "$LLVM_VERSION" in
      LLVM_3_6=true
      AS_IF([test "x$target" != "x$host"], [
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[test "x$build" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
      ],[
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
      ])
@@ -143,6 +156,8 @@ case "$LLVM_VERSION" in
      3.7*)
      AC_DEFINE([LLVM_3_7], [], "Using LLVM svn, upcoming 3.7")
      AS_IF([test "x$target" != "x$host"], [
+       LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
+     ],[test "x$build" != "x$host"], [
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG_HOST --system-libs`"
      ],[
        LLVM_LDFLAGS="$LLVM_LDFLAGS `$LLVM_CONFIG --system-libs`"
@@ -922,14 +937,10 @@ else
 fi
 AC_MSG_RESULT($LD_SHARED)
 
-HOST_CLANG_FLAGS=""
 HOST_LLC_FLAGS="-relocation-model=pic"
-HOST_AS_FLAGS=""
 HOST_LD_FLAGS="$LD_SHARED"
 
-TARGET_CLANG_FLAGS=""
 TARGET_LLC_FLAGS="-relocation-model=pic"
-TARGET_AS_FLAGS=""
 TARGET_LD_FLAGS="$LD_SHARED"
 
 # TODO: We need to set both target-triple and cpu-type when

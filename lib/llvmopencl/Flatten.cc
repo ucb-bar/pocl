@@ -38,26 +38,16 @@ IGNORE_COMPILER_WARNING("-Wunused-parameter")
 #include "llvm/IR/Module.h"
 #endif
 
+#include "Flatten.h"
+
 POP_COMPILER_DIAGS
 
 using namespace llvm;
 
-namespace {
-  class Flatten : public ModulePass {
-
-  public:
-    static char ID;
-    Flatten() : ModulePass(ID) {}
-
-    virtual bool runOnModule(Module &M);
-  };
-
-}
-
 extern cl::opt<std::string> KernelName;
 
-char Flatten::ID = 0;
-static RegisterPass<Flatten> X("flatten", "Kernel function flattening pass");
+char pocl::Flatten::ID = 0;
+static RegisterPass<pocl::Flatten> X("flatten", "Kernel function flattening pass");
 
 //#define DEBUG_FLATTEN
 
@@ -66,7 +56,7 @@ static RegisterPass<Flatten> X("flatten", "Kernel function flattening pass");
 #ifdef INLINE_ALL_NON_KERNEL
 
 bool
-Flatten::runOnModule(Module &M)
+pocl::Flatten::runOnModule(Module &M)
 {
   bool changed = false;
   for (llvm::Module::iterator i = M.begin(), e = M.end(); i != e; ++i)
@@ -74,7 +64,8 @@ Flatten::runOnModule(Module &M)
       llvm::Function *f = i;
       if (f->isDeclaration()) continue;
       if (KernelName == f->getName() || 
-          (KernelName == "" && pocl::Workgroup::isKernelToProcess(*f)))
+          //(KernelName == "" && pocl::Workgroup::isKernelToProcess(*f)))
+          (pocl::Workgroup::isKernelToProcess(*f)))
         {
 #ifdef LLVM_3_1
           f->removeFnAttr(Attribute::AlwaysInline);
@@ -146,7 +137,7 @@ static const char *workgroup_variables[] = {
 };
 
 bool
-Flatten::runOnModule(Module &M)
+pocl::Flatten::runOnModule(Module &M)
 {
   SmallPtrSet<Function *, 8> functions_to_inline;
   SmallVector<Value *, 8> pending;

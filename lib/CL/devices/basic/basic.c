@@ -508,7 +508,9 @@ pocl_basic_alloc_mem_obj (cl_device_id device, cl_mem mem_obj)
         {
           b = pocl_memalign_alloc(MAX_EXTENDED_ALIGNMENT, mem_obj->size);
           if (b == NULL){
+#ifdef DEBUG_POCL_LLVM_API
             printf("align:%d, size:%d\n",MAX_EXTENDED_ALIGNMENT,mem_obj->size);
+#endif
             return CL_MEM_OBJECT_ALLOCATION_FAILURE;
           }
         }
@@ -566,7 +568,9 @@ pocl_basic_run
 (void *data, 
  _cl_command_node* cmd)
 {
+#ifdef DEBUG_POCL_LLVM_API
   printf("start pocl_basic_run\n");fflush(stdout);fflush(stderr);
+#endif
   struct data *d;
   struct pocl_argument *al;
   size_t x, y, z;
@@ -583,7 +587,9 @@ pocl_basic_run
       sizeof(void*) * (kernel->num_args + kernel->num_locals)
     );
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("start handling args\n");fflush(stdout);fflush(stderr);
+#endif
   /* Process the kernel arguments. Convert the opaque buffer
      pointers to real device pointers, allocate dynamic local 
      memory buffers, etc. */
@@ -643,13 +649,17 @@ pocl_basic_run
       *(void **)(arguments[i]) = pocl_basic_malloc (data, 0, al->size, NULL);
     }
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("start running wg\n");fflush(stdout);fflush(stderr);
+#endif
+#ifdef CROSS_COMPILE_EXTRACTOR
   char* wg_file = "wg_array.h";
   char wg_header[300];
   int wg_header_size = snprintf(wg_header, 300, "char wg_array[%u][%u] = {\n",
       pc->num_groups[0] * pc->num_groups[1] * pc->num_groups[2],
       sizeof(struct pocl_context));
   pocl_write_file(wg_file, wg_header, wg_header_size, 0, 0);
+#endif
   for (z = 0; z < pc->num_groups[2]; ++z)
     {
       for (y = 0; y < pc->num_groups[1]; ++y)
@@ -660,6 +670,7 @@ pocl_basic_run
               pc->group_id[1] = y;
               pc->group_id[2] = z;
 
+#ifdef CROSS_COMPILE_EXTRACTOR
               char* start_line = "{";
               pocl_write_file(wg_file, start_line, 1, 1, 1);
               for(i = 0; i < sizeof(struct pocl_context); i++) {
@@ -675,6 +686,10 @@ pocl_basic_run
               } else {
                 pocl_write_file(wg_file, end_line, 3, 1, 1);
               }
+#endif
+#ifdef DEBUG_POCL_LLVM_API
+  if(x==0) { printf("launch pc wg x:%d y:%d z:%d\n",x,y,z);fflush(stdout);fflush(stderr); }
+#endif
               cmd->command.run.wg (arguments, pc);
 
             }
@@ -966,7 +981,9 @@ void check_compiler_cache (_cl_command_node *cmd)
   const char* module_fn = llvm_codegen (cmd->command.run.tmp_dir,
                                         cmd->command.run.kernel,
                                         cmd->device);
+#ifdef DEBUG_POCL_LLVM_API
   printf("dlopen:%s\n",module_fn);fflush(stdout);fflush(stderr);
+#endif
   dlhandle = lt_dlopen (module_fn);
   if (dlhandle == NULL)
     {

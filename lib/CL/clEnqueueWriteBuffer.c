@@ -89,6 +89,7 @@ POname(clEnqueueWriteBuffer)(cl_command_queue command_queue,
   pocl_command_enqueue(command_queue, cmd);
 
   cl_mem_t* m = (cl_mem_t*)&buffer;
+#ifdef CROSS_COMPILE_EXTRACTOR
           char* name = get_mem_arg_map(buffer);
           //printf("buffer->flags:%d\n",buffer->flags);
           //printf("write_only:%d\n",CL_MEM_WRITE_ONLY);
@@ -107,6 +108,7 @@ POname(clEnqueueWriteBuffer)(cl_command_queue command_queue,
             // Not writing it to the file now
             put_buffer_arg_map(buffer, ptr);
           }
+#endif
   
   if (blocking_write)
     POname(clFinish) (command_queue);

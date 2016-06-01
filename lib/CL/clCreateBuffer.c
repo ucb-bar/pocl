@@ -91,6 +91,9 @@ POname(clCreateBuffer)(cl_context context,
         (~flags & CL_MEM_COPY_HOST_PTR)), CL_INVALID_HOST_PTR,
         "host_ptr is not NULL, but flags don't specify {COPY|USE}_HOST_PTR\n");
     }
+#ifdef DEBUG_POCL_LLVM_API
+  fprintf(stderr, "after validate flags\n"); fflush(stderr);
+#endif
   
   for (i = 0; i < context->num_devices; ++i)
     {
@@ -103,6 +106,9 @@ POname(clCreateBuffer)(cl_context context,
         "Size (%lu) is bigger than CL_DEVICE_MAX_MEM_ALLOC_SIZE(%lu) of device %s\n",
         (unsigned long)size, (unsigned long)max_alloc, context->devices[i]->long_name);
     }
+#ifdef DEBUG_POCL_LLVM_API
+  fprintf(stderr, "after getdeviceinfo \n"); fflush(stderr);
+#endif
   
   POCL_INIT_OBJECT(mem);
   mem->parent = NULL;
@@ -143,6 +149,9 @@ POname(clCreateBuffer)(cl_context context,
           errcode = CL_MEM_OBJECT_ALLOCATION_FAILURE;
           goto ERROR_CLEAN_MEM_AND_DEVICE;
         }
+
+      for(j = 0; j < size; j++)
+        ((char*)(mem->device_ptrs[device->dev_id].mem_ptr))[j] = 0;
     }
   
   POCL_RETAIN_OBJECT(context);

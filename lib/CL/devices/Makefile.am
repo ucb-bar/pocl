@@ -33,6 +33,7 @@ libpocl_devices_la_LIBADD = pthread/libpocl-devices-pthread.la \
 	basic/libpocl-devices-basic.la topology/libpocl-devices-topology.la 
 
 libpocl_devices_la_CPPFLAGS = \
+  -fPIC \
   -I$(top_srcdir)/fix-include \
   -I$(top_srcdir)/include \
   -I$(top_srcdir)/lib/CL/devices \

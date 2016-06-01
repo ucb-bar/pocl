@@ -227,10 +227,17 @@ int pocl_write_file(const char *path, const char* content,
         }
     }
 
-    if (append)
+    if (append) {
+#ifdef DEBUG_POCL_LLVM_API
+    //printf("open for append%s\n",path);fflush(stdout);
+#endif
         OPEN_FOR_APPEND;
-    else
+    } else {
+#ifdef DEBUG_POCL_LLVM_API
+    printf("open for create:%s\n",path);fflush(stdout);
+#endif
         OPEN_CREATE;
+    }
 
     if(ec) printf("open error:%s\n",ec.message().c_str());
     fflush(stdout);fflush(stderr);

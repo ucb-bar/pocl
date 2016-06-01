@@ -81,6 +81,7 @@ POname(clEnqueueReadBuffer)(cl_command_queue command_queue,
 
     POname(clFinish) (command_queue);
   //COLIN FIXME: this might only work if they finish before reading
+#ifdef CROSS_COMPILE_EXTRACTOR
           char* name = get_mem_arg_map(buffer);
           put_output_arg_map(name, 1);
           char input_file[POCL_FILENAME_LENGTH];
@@ -92,6 +93,7 @@ POname(clEnqueueReadBuffer)(cl_command_queue command_queue,
             //printf("Writing byte_text:%s\n",byte_text);
             pocl_write_file(input_file, byte_text, 5, 1, 1);
           }
+#endif
 
   if (blocking_read)
     POname(clFinish) (command_queue);

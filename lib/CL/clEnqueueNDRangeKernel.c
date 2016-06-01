@@ -54,7 +54,9 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
                        const cl_event *event_wait_list,
                        cl_event *event) CL_API_SUFFIX__VERSION_1_0
 {
+#ifdef DEBUG_POCL_LLVM_API
   printf("start enquequeNDRangeKernel\n");fflush(stdout);
+#endif
   size_t offset_x, offset_y, offset_z;
   size_t global_x, global_y, global_z;
   size_t local_x, local_y, local_z;
@@ -64,24 +66,34 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
   _cl_command_node *command_node;
   void* cache_lock;
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check cmd queue\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((command_queue == NULL), CL_INVALID_COMMAND_QUEUE);
   
+#ifdef DEBUG_POCL_LLVM_API
   printf("check kernel\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((kernel == NULL), CL_INVALID_KERNEL);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check context\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_ON((command_queue->context != kernel->context),
     CL_INVALID_CONTEXT, "kernel and command_queue are not from the same context\n");
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check work_dim\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((work_dim < 1), CL_INVALID_WORK_DIMENSION);
   POCL_RETURN_ERROR_ON((work_dim > command_queue->device->max_work_item_dimensions),
     CL_INVALID_WORK_DIMENSION, "work_dim exceeds devices' max workitem dimensions\n");
 
   assert(command_queue->device->max_work_item_dimensions <= 3);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("calc offset\n");fflush(stdout);
+#endif
   if (global_work_offset != NULL)
     {
       offset_x = global_work_offset[0];
@@ -95,28 +107,46 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
       offset_z = 0;
     }
     
-  printf("calc global\n");fflush(stdout);
+#ifdef DEBUG_POCL_LLVM_API
+  printf("input global x:%ld y:%ld z:%ld\n",global_work_size[0],global_work_size[1],global_work_size[2]);fflush(stdout);
+#endif
   global_x = global_work_size[0];
   global_y = work_dim > 1 ? global_work_size[1] : 1;
   global_z = work_dim > 2 ? global_work_size[2] : 1;
+#ifdef DEBUG_POCL_LLVM_API
+  printf("calc global x:%ld y:%ld z:%ld\n",global_x,global_y,global_z);fflush(stdout);
+#endif
 
+
+#ifdef DEBUG_POCL_LLVM_API
   printf("check global\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((global_x == 0 || global_y == 0 || global_z == 0),
     CL_INVALID_GLOBAL_WORK_SIZE);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check args\n");fflush(stdout);
+#endif
   for (i = 0; i < kernel->num_args; i++)
     {
       POCL_RETURN_ERROR_ON((!kernel->arg_info[i].is_set), CL_INVALID_KERNEL_ARGS,
         "The %i-th kernel argument is not set!\n", i)
     }
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("calc local\n");fflush(stdout);
+#endif
+#ifdef DEBUG_POCL_LLVM_API
+  printf("input local x:%ld y:%ld z:%ld\n",local_work_size[0],local_work_size[1],local_work_size[2]);fflush(stdout);
+#endif
   if (local_work_size != NULL) 
     {
       local_x = local_work_size[0];
       local_y = work_dim > 1 ? local_work_size[1] : 1;
       local_z = work_dim > 2 ? local_work_size[2] : 1;
+#ifdef DEBUG_POCL_LLVM_API
+      printf("local x:%ld y:%ld z:%ld\n",local_x,local_y,local_z);fflush(stdout);
+#endif
     } 
   else 
     {
@@ -205,7 +235,9 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
       while (local_x * local_y * local_z >
              command_queue->device->max_work_group_size);
     }
+#ifdef DEBUG_POCL_LLVM_API
   printf("queue kernel\n");fflush(stdout);
+#endif
 
   POCL_MSG_PRINT_INFO("Queueing kernel %s with local size %u x %u x %u group "
                       "sizes %u x %u x %u...\n",
@@ -215,11 +247,15 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
                       (unsigned)(global_y / local_y), 
                       (unsigned)(global_z / local_z));
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check workgroupsize\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_ON((local_x * local_y * local_z > command_queue->device->max_work_group_size),
     CL_INVALID_WORK_GROUP_SIZE, "Local worksize dimensions exceed device's max workgroup size\n");
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check workitemsize\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_ON((local_x > command_queue->device->max_work_item_sizes[0]),
     CL_INVALID_WORK_ITEM_SIZE, "local_work_size.x > device's max_workitem_sizes[0]\n");
 
@@ -231,35 +267,47 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
     POCL_RETURN_ERROR_ON((local_z > command_queue->device->max_work_item_sizes[2]),
     CL_INVALID_WORK_ITEM_SIZE, "local_work_size.z > device's max_workitem_sizes[2]\n");
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check global/local\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((global_x % local_x != 0), CL_INVALID_WORK_GROUP_SIZE);
   POCL_RETURN_ERROR_COND((global_y % local_y != 0), CL_INVALID_WORK_GROUP_SIZE);
   POCL_RETURN_ERROR_COND((global_z % local_z != 0), CL_INVALID_WORK_GROUP_SIZE);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("check waitlist\n");fflush(stdout);
+#endif
   POCL_RETURN_ERROR_COND((event_wait_list == NULL && num_events_in_wait_list > 0),
     CL_INVALID_EVENT_WAIT_LIST);
 
   POCL_RETURN_ERROR_COND((event_wait_list != NULL && num_events_in_wait_list == 0),
     CL_INVALID_EVENT_WAIT_LIST);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("cache lock\n");fflush(stdout);
+#endif
   cache_lock = pocl_cache_acquire_writer_lock(kernel->program,
                                               command_queue->device);
   assert(cache_lock);
 
   char cachedir[POCL_FILENAME_LENGTH];
+#ifdef DEBUG_POCL_LLVM_API
   printf("make cache dir\n");fflush(stdout);
+#endif
   pocl_cache_make_kernel_cachedir_path(cachedir, kernel->program,
                                   command_queue->device, kernel,
                                   local_x, local_y, local_z);
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("generate func\n");fflush(stdout);
+#endif
   error = pocl_llvm_generate_workgroup_function(command_queue->device,
                                 kernel, local_x, local_y, local_z);
   if (error) goto ERROR;
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("create cmd\n");fflush(stdout);
+#endif
   error = pocl_create_command (&command_node, command_queue,
                                CL_COMMAND_NDRANGE_KERNEL,
                                event, num_events_in_wait_list,
@@ -284,7 +332,9 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
   command_node->command.run.local_y = local_y;
   command_node->command.run.local_z = local_z;
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("start copying arguments\n");fflush(stdout);fflush(stderr);
+#endif
   /* Copy the currently set kernel arguments because the same kernel 
      object can be reused for new launches with different arguments. */
   command_node->command.run.arguments =
@@ -353,7 +403,9 @@ POname(clEnqueueNDRangeKernel)(cl_command_queue command_queue,
       }
   }
 
+#ifdef DEBUG_POCL_LLVM_API
   printf("command enqueue\n");fflush(stdout);fflush(stderr);
+#endif
   pocl_command_enqueue (command_queue, command_node);
   error = CL_SUCCESS;
 

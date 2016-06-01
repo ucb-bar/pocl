@@ -211,7 +211,9 @@ static void exec_commands (_cl_command_node *node_list)
           POCL_UPDATE_EVENT_COMPLETE(event);
           break;
         case CL_COMMAND_NDRANGE_KERNEL:
+#ifdef DEBUG_POCL_LLVM_API
           printf("start command ndrange kernel\n");fflush(stdout);fflush(stderr);
+#endif
           assert (*event == node->event);
           POCL_UPDATE_EVENT_RUNNING(event);
           node->device->ops->run(node->command.run.data, node);

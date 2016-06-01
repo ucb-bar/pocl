@@ -45,7 +45,7 @@ PASSES_SOURCES = Barrier.h						\
                         LoopBarriers.h LoopBarriers.cc				\
                         GenerateHeader.cc Workgroup.h Workgroup.cc		\
 						BarrierTailReplication.h BarrierTailReplication.cc	\
-                        Flatten.cc IsolateRegions.h IsolateRegions.cc \
+                        Flatten.h Flatten.cc IsolateRegions.h IsolateRegions.cc \
 						WorkitemReplication.h WorkitemReplication.cc \
 						ImplicitLoopBarriers.h ImplicitLoopBarriers.cc \
 						WorkItemAliasAnalysis.cc \

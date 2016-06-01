@@ -1,6 +1,8 @@
-// Header for WorkitemHandlerChooser function pass.
+// LLVM module pass to inline required functions (those accessing
+// per-workgroup variables) into the kernel.
 // 
-// Copyright (c) 2012 Pekka Jääskeläinen / TUT
+// Copyright (c) 2011 Universidad Rey Juan Carlos
+//               2012-2015 Pekka Jääskeläinen
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,41 +22,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef _POCL_WORKITEM_HANDLER_CHOOSER_H
-#define _POCL_WORKITEM_HANDLER_CHOOSER_H
 
-#include "WorkitemHandler.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/PassRegistry.h"
+#ifndef _POCL_FLATTEN_H
+#define _POCL_FLATTEN_H
 
-namespace llvm {
-  void initializeWorkitemHandlerChooserPass(PassRegistry &);
-}
+#include "config.h"
+#if (defined LLVM_3_1 || defined LLVM_3_2)
+#include "llvm/Module.h"
+#else
+#include "llvm/IR/Module.h"
+#endif
+#include "llvm/Pass.h"
 
 namespace pocl {
-  class Workgroup;
-
-  class WorkitemHandlerChooser : public pocl::WorkitemHandler {
+  class Flatten : public llvm::ModulePass {
+  
   public:
     static char ID;
+    Flatten() : ModulePass(ID) {}
     
-    enum WorkitemHandlerType {
-      POCL_WIH_FULL_REPLICATION,
-      POCL_WIH_LOOPS,
-      POCL_WIH_SPMD
-    };
+    virtual bool runOnModule(llvm::Module &M);
 
-  WorkitemHandlerChooser() : pocl::WorkitemHandler(ID), 
-      chosenHandler_(POCL_WIH_LOOPS) {
-        llvm::initializeWorkitemHandlerChooserPass(*llvm::PassRegistry::getPassRegistry());
-      }
-
-    virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const;
-    virtual bool runOnFunction(llvm::Function &F);
-    
-    WorkitemHandlerType chosenHandler() { return chosenHandler_; }
-  private:
-    WorkitemHandlerType chosenHandler_;
   };
 }
 

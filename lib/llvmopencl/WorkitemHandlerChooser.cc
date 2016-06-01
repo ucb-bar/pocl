@@ -39,18 +39,10 @@
 using namespace llvm;
 using namespace pocl;
 
-namespace {
-  static
-  RegisterPass<WorkitemHandlerChooser> X(
-      "workitem-handler-chooser", 
-      "Finds the best way to handle work-items to produce a multi-WG function.",
-      false, false);
   
-}
 
 namespace pocl {
 
-char WorkitemHandlerChooser::ID = 0;
 
 void
 WorkitemHandlerChooser::getAnalysisUsage(AnalysisUsage &AU) const
@@ -80,7 +72,10 @@ WorkitemHandlerChooser::runOnFunction(Function &F)
     {
       method = getenv("POCL_WORK_GROUP_METHOD");
       if (method == "spmd")
-        chosenHandler_ = POCL_WIH_SPMD;
+        if (F.getParent()->getTargetTriple().find("riscv") != std::string::npos)
+          chosenHandler_ = POCL_WIH_SPMD;
+        else
+          chosenHandler_ = POCL_WIH_LOOPS;
       else if (method == "repl" || method == "workitemrepl")
         chosenHandler_ = POCL_WIH_FULL_REPLICATION;
       else if (method == "loops" || method == "workitemloops" || method == "loopvec")
@@ -114,3 +109,7 @@ WorkitemHandlerChooser::runOnFunction(Function &F)
 }
 
 }
+char WorkitemHandlerChooser::ID = 0;
+INITIALIZE_PASS(WorkitemHandlerChooser, "workitem-handler-chooser",
+    "Finds the best way to handle work-items to produce a multi-WG function.",
+    false, false)

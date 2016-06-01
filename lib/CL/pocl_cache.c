@@ -71,10 +71,16 @@ static void program_device_dir(char*        path,
     /* sanity check on SHA1 digest emptiness */
     assert(program->build_hash[device_i][0] > 0);
 
+#ifdef DEBUG_POCL_LLVM_API
+  printf("bc_path:%s\n",path);fflush(stdout);fflush(stderr);
+#endif
     int bytes_written = snprintf(path, POCL_FILENAME_LENGTH,
                                  "%s/%s%s", cache_topdir,
                                  program->build_hash[device_i],
                                  append_path);
+#ifdef DEBUG_POCL_LLVM_API
+  printf("bytes:%d:bc_path:%s\n",bytes_written,path);fflush(stdout);fflush(stderr);
+#endif
     assert(bytes_written > 0 && bytes_written < POCL_FILENAME_LENGTH);
 }
 
@@ -84,11 +90,19 @@ void pocl_cache_program_bc_path(char*        program_bc_path,
                                 cl_program   program,
                                 unsigned     device_i,
                                 char*        append) {
+#ifdef DEBUG_POCL_LLVM_API
     printf("program_bc_path:%s\n",program_bc_path);fflush(stdout);
+#endif
     char str_append[POCL_FILENAME_LENGTH];
     snprintf(str_append, POCL_FILENAME_LENGTH, "%s%s", append, POCL_PROGRAM_BC_FILENAME);
+#ifdef DEBUG_POCL_LLVM_API
+  printf("bc_path_append:%s\n",str_append);fflush(stdout);fflush(stderr);
+#endif
     program_device_dir(program_bc_path, program,
                        device_i, str_append);
+#ifdef DEBUG_POCL_LLVM_API
+  printf("bc_path_after_device_dir:%s\n",program_bc_path);fflush(stdout);fflush(stderr);
+#endif
 }
 
 // required in llvm API
@@ -182,7 +196,9 @@ int pocl_cache_device_cachedir_exists(cl_program   program,
     char device_cachedir_path[POCL_FILENAME_LENGTH];
     program_device_dir(device_cachedir_path, program, device_i, "");
 
+#ifdef DEBUG_POCL_LLVM_API
     printf("device_cachedir:%s\n",device_cachedir_path);fflush(stdout);
+#endif
     return pocl_exists(device_cachedir_path);
 }
 
@@ -286,7 +302,9 @@ int pocl_cache_write_kernel_parallel_bc(void*        host_bc,
                                         size_t       local_y,
                                         size_t       local_z) {
     assert(host_bc);
-    assert(target_bc);
+#ifdef CROSS_COMPILE_EXTRACTOR
+    //assert(target_bc);
+#endif
 
     char kernel_parallel_path[POCL_FILENAME_LENGTH];
     char target_kernel_parallel_path[POCL_FILENAME_LENGTH];
@@ -303,9 +321,15 @@ int pocl_cache_write_kernel_parallel_bc(void*        host_bc,
     strcat(kernel_parallel_path, POCL_PARALLEL_BC_FILENAME);
     strcat(target_kernel_parallel_path, "/target_");
     strcat(target_kernel_parallel_path, POCL_PARALLEL_BC_FILENAME);
-    printf("write target module:%s\n",target_kernel_parallel_path);fflush(stdout);
-    pocl_write_module(target_bc, target_kernel_parallel_path, 0); //COLIN FIXME
+#ifdef DEBUG_POCL_LLVM_API
+    if(target_bc != NULL)
+      printf("write target module:%s\n",target_kernel_parallel_path);fflush(stdout);
+#endif
+    if(target_bc != NULL)
+      pocl_write_module(target_bc, target_kernel_parallel_path, 0); //COLIN FIXME
+#ifdef DEBUG_POCL_LLVM_API
     printf("write host module:%s\n",kernel_parallel_path);fflush(stdout);
+#endif
     return pocl_write_module(host_bc, kernel_parallel_path, 0);
 }
 
@@ -517,8 +541,12 @@ pocl_cache_create_program_cachedir(cl_program program,
         hs_len = source_len;
     }
 
-    if (program->build_hash[device_i])
+    if (program->build_hash[device_i]){
         memcpy(old_build_hash, program->build_hash[device_i], SHA1_DIGEST_SIZE);
+#ifdef DEBUG_POCL_LLVM_API
+  printf("build_hash exists\n");fflush(stdout);fflush(stderr);
+#endif
+    }
 
     build_program_compute_hash(program, device_i, hash_source, hs_len);
 
@@ -527,6 +555,9 @@ pocl_cache_create_program_cachedir(cl_program program,
     if (old_build_hash[0] && memcmp(old_build_hash, program->build_hash[device_i],
             SHA1_DIGEST_SIZE))
     {
+#ifdef DEBUG_POCL_LLVM_API
+  printf("different hash cleaning\n");fflush(stdout);fflush(stderr);
+#endif
         if (program->binaries[device_i]) {
             POCL_MEM_FREE(program->binaries[device_i]);
             program->binary_sizes[device_i] = 0;
@@ -536,7 +567,9 @@ pocl_cache_create_program_cachedir(cl_program program,
 
     program_device_dir(target_program_bc_path, program, device_i, "/target");
     program_device_dir(host_program_bc_path, program, device_i, "/host");
+#ifdef DEBUG_POCL_LLVM_API
     printf("cache_create host:%s,target:%s\n",host_program_bc_path,target_program_bc_path);
+#endif
 
     if (pocl_mkdir_p(target_program_bc_path))
         return 1;

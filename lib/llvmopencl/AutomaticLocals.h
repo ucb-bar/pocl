@@ -1,6 +1,6 @@
-// Header for WorkitemHandlerChooser function pass.
+// Header for AutomaticLocals.cc module pass.
 // 
-// Copyright (c) 2012 Pekka Jääskeläinen / TUT
+// Copyright (c) 2011 Universidad Rey Juan Carlos
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,41 +20,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef _POCL_WORKITEM_HANDLER_CHOOSER_H
-#define _POCL_WORKITEM_HANDLER_CHOOSER_H
+#ifndef _POCL_AUTOMATICLOCALS_H
+#define _POCL_AUTOMATICLOCALS_H
 
-#include "WorkitemHandler.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/PassRegistry.h"
-
-namespace llvm {
-  void initializeWorkitemHandlerChooserPass(PassRegistry &);
-}
+#include "config.h"
+#if (defined LLVM_3_1 || defined LLVM_3_2)
+#include "llvm/Module.h"
+#else
+#include "llvm/IR/Module.h"
+#endif
+#include "llvm/Pass.h"
 
 namespace pocl {
-  class Workgroup;
-
-  class WorkitemHandlerChooser : public pocl::WorkitemHandler {
+  class AutomaticLocals : public llvm::ModulePass {
+  
   public:
     static char ID;
+    AutomaticLocals() : ModulePass(ID) {}
     
-    enum WorkitemHandlerType {
-      POCL_WIH_FULL_REPLICATION,
-      POCL_WIH_LOOPS,
-      POCL_WIH_SPMD
-    };
-
-  WorkitemHandlerChooser() : pocl::WorkitemHandler(ID), 
-      chosenHandler_(POCL_WIH_LOOPS) {
-        llvm::initializeWorkitemHandlerChooserPass(*llvm::PassRegistry::getPassRegistry());
-      }
-
     virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const;
-    virtual bool runOnFunction(llvm::Function &F);
-    
-    WorkitemHandlerType chosenHandler() { return chosenHandler_; }
+    virtual bool runOnModule(llvm::Module &M);
+
   private:
-    WorkitemHandlerType chosenHandler_;
+    llvm::Function *ProcessAutomaticLocals(llvm::Function *F);
   };
 }
 
